@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "composite": true,
+    "outDir": "node_modules/.tsc/web",
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/renderer/*"] },
+    "types": ["vite/client"]
+  },
+  "include": ["src/renderer/**/*", "src/preload/*.d.ts"]
+}
