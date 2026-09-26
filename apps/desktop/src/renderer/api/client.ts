@@ -7,6 +7,26 @@ export { GatewayError }
 const BASE = `${import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8000'}/api/v1`
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
+/**
+ * Mixed mode: with mocks on, paths matching VITE_LIVE_ROUTES go to the real gateway, so endpoints can
+ * go live one at a time. Comma-separated, `*` matches one segment: "/auth/login,/me,/patients/*".
+ */
+const LIVE_ROUTES = (import.meta.env.VITE_LIVE_ROUTES ?? '')
+  .split(',')
+  .map((s: string) => s.trim())
+  .filter(Boolean)
+
+export function matchesRoute(path: string, patterns: string[]): boolean {
+  const segs = (path.split('?')[0] ?? '').split('/')
+  return patterns.some((p) => {
+    const ps = p.split('/')
+    return ps.length === segs.length && ps.every((x, i) => x === '*' || x === segs[i])
+  })
+}
+
+/** True when this path is served by the in-memory mock gateway. */
+export const isMocked = (path: string): boolean => USE_MOCKS && !matchesRoute(path, LIVE_ROUTES)
+
 type TokenGetter = () => string | null
 type UnauthorizedHandler = () => void
 let getToken: TokenGetter = () => null
@@ -37,7 +57,7 @@ export async function gateway<T>(path: string, opts: RequestOptions = {}): Promi
       ).toString()
     : ''
 
-  if (USE_MOCKS) {
+  if (isMocked(path)) {
     try {
       return (await mockGateway(method, path + qs, body ?? form, getToken())) as T
     } catch (e) {

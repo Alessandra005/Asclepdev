@@ -114,7 +114,7 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 
 1. ~~Copy this folder into the repo (`apps/desktop/`) and add `AGENT_CONTEXT.md` (spec sections 13–17).~~ Done.
 2. `pnpm gen:api` as soon as Ron's OpenAPI exists; swap `api/types.ts` to re-export generated types.
-   Turn mocks off (`VITE_USE_MOCKS=false`) route by route as real endpoints land.
+   Go live route by route with `VITE_LIVE_ROUTES` (see `docs/BACKEND_HANDOFF.md`), then `VITE_USE_MOCKS=false`.
 3. Admin tab: pending consent tasks + "Record consent" (needed for demo step 3 with two windows).
 4. Lab: OpenSeadragon viewer + heatmap overlay + real tiles from `GET /files/{path}`.
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).

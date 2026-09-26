@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { scribeApi } from '@/api/hooks'
-import { USE_MOCKS } from '@/api/client'
+import { isMocked } from '@/api/client'
 import type { ScribeObservation } from '@/api/types'
 
 const FRAME_MS = 1000 // 1 frame/s
@@ -84,7 +84,7 @@ export function useScribeCapture(sessionId: string | null, paused: boolean, onAu
         setDropped((n) => n + 1)
         return
       }
-      if (batch.length === 0 && !USE_MOCKS) return
+      if (batch.length === 0 && !isMocked(`/scribe-sessions/${sessionId}/window`)) return
       inFlight.current = true
       scribeApi
         .window(sessionId, batch)

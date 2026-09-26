@@ -79,9 +79,23 @@ const clock = (s: number): string =>
   `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
 
 function userFromToken(token: string | null): (typeof USERS)[number] {
-  const u = USERS.find((x) => token === 'mock-token-' + x.id)
+  const u = USERS.find((x) => token === 'mock-token-' + x.id) ?? userFromGatewayJwt(token)
   if (!u) return fail(401, 'UNAUTHENTICATED', 'Session expired. Sign in again.')
   return u
+}
+/**
+ * Mixed mode (VITE_LIVE_ROUTES): login is real, so mocked routes see the gateway's JWT. Its payload is
+ * {sub, role} (services/api/app/auth/security.py); map the role to the first demo user with it.
+ */
+function userFromGatewayJwt(token: string | null): (typeof USERS)[number] | undefined {
+  const part = token?.split('.')[1]
+  if (!part) return undefined
+  try {
+    const { role } = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { role?: string }
+    return USERS.find((x) => x.role === role)
+  } catch {
+    return undefined
+  }
 }
 function requireCareTeam(
   u: (typeof USERS)[number],

@@ -5,5 +5,5 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   resolve: { alias: { '@': resolve('src/renderer') } },
-  test: { environment: 'jsdom', include: ['src/renderer/**/*.test.tsx'], setupFiles: ['src/renderer/test/setup.ts'] }
+  test: { environment: 'jsdom', include: ['src/renderer/**/*.test.{ts,tsx}'], setupFiles: ['src/renderer/test/setup.ts'] }
 })
