@@ -1,0 +1,12 @@
+line-length = 130
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I"]
+
+[lint.isort]
+known-first-party = ["app", "asclep_contracts"]
+
+[lint.per-file-ignores]
+"services/api/migrations/versions/*" = ["E501"]
+"services/api/app/rbac/permissions.py" = ["E501"]

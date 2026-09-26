@@ -1,0 +1,22 @@
+# Object + link registry (spec 7A.2). Owner: Ron. Extend, don't rename.
+object_types:
+  Patient:      {table: patient, title: "{given_name} {family_name}", folder: null, icon: person}
+  Encounter:    {table: encounter, title: "{type} {start_at:%b %d %Y}", time_field: start_at, patient_field: patient_id, folder: Encounters, icon: calendar}
+  Observation:  {table: observation, title: "{display}: {value_num} {unit}", time_field: effective_at, patient_field: patient_id, searchable_text: [display, value_text], folder: Labs, icon: pulse}
+  Condition:    {table: condition, title: "{display}", time_field: effective_at, patient_field: patient_id, searchable_text: [display], folder: Problems, icon: diagnosis}
+  Allergy:      {table: allergy, title: "{substance}", patient_field: patient_id, folder: Allergies, icon: warning-sign}
+  MedicationRequest: {table: medication_request, title: "{dosage_text}", patient_field: patient_id, folder: Medications, icon: prescription}
+  InventoryItem: {table: inventory_item, title: "inventory", icon: box}
+  Specimen:     {table: specimen, title: "{accession}", patient_field: patient_id, folder: Pathology, icon: lab-test}
+  Slide:        {table: slide, title: "{stain} slide", folder: Pathology, icon: media}
+  Finding:      {table: finding, title: "{label} ({status})", time_field: created_at, patient_field: patient_id, folder: Pathology, icon: lab-test}
+  Report:       {table: report, title: "Pathology report draft", folder: Pathology, icon: document}
+  Note:         {table: note, title: "{kind} note, {effective_at:%b %d %Y}", time_field: effective_at, patient_field: patient_id, searchable_text: [body], folder: Notes, icon: document}
+  Referral:     {table: referral, title: "Referral: {reason}", patient_field: patient_id, folder: Referrals, icon: arrow-right}
+link_types:
+  fulfilled_by:   {from: MedicationRequest, to: InventoryItem, derived_by: rule, cardinality: many-to-one}
+  same_as:        {from: "*", to: "*", derived_by: rule, cardinality: many-to-many}
+  conflicts_with: {from: "*", to: "*", derived_by: rule, cardinality: many-to-many}
+  supports:       {from: Finding, to: Condition, derived_by: human, cardinality: many-to-one}
+  evidence_for:   {from: Observation, to: Condition, derived_by: rule, cardinality: many-to-many}
+  mentions:       {from: Note, to: Condition, derived_by: resident, cardinality: many-to-many}

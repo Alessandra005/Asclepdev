@@ -1,0 +1,14 @@
+# Context view recipes (spec 7A.6). Owner: Ron. Implementation reads these; do not hard-code views.
+pathology_review:
+  subject: Finding
+  include:
+    - {type: Patient, via: finding.patient}
+    - {type: Observation, filter: {code_group: smoking_history}, latest: 1}
+    - {type: Condition, filter: {code_group: [lung_oncology, respiratory], status: active}, max: 6}
+    - {type: Finding, filter: {patient: same, exclude_self: true}, max: 3}
+    - {type: Note, filter: {kind: [imaging_report], since_days: 365}, max: 3}
+    - {type: Allergy, filter: {status: current}, include_links: [conflicts_with]}
+    - {type: MedicationRequest, filter: {status: active}, include_links: [fulfilled_by]}
+  rank: [task_relevance, abnormal, unreviewed, recency]
+  token_budget: 3000
+# TODO(Ron): dashboard, visit_prep, transcript_diff, records_tree, ask_slice

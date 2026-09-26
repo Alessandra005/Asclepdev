@@ -1,0 +1,8 @@
+# Changes here require Ron's review (spec section 4)
+/packages/contracts/        @RonaldSierraDev
+/services/api/migrations/   @RonaldSierraDev
+/services/api/app/auth/     @RonaldSierraDev
+/services/api/app/rbac/     @RonaldSierraDev
+/services/api/app/audit/    @RonaldSierraDev
+/infra/                     @RonaldSierraDev
+/docs/SPEC.md               @RonaldSierraDev

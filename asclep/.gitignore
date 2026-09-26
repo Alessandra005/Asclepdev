@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+out/
+.DS_Store
+# large or private data
+data/slides/*
+!data/slides/.gitkeep
+data/embeddings/*
+!data/embeddings/.gitkeep
+data/heatmaps/*
+!data/heatmaps/.gitkeep
