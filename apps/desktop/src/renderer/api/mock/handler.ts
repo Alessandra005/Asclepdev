@@ -1,7 +1,7 @@
 /**
  * In-memory mock gateway. Mirrors spec section 15 paths, error envelope and RBAC so the UI can be
- * built before the backend exists. Toggle with VITE_USE_MOCKS=true. Delete nothing here when the real
- * gateway lands; it doubles as the fixture source for Vitest.
+ * built before the backend exists. On by default; VITE_USE_MOCKS=false turns it off. Delete nothing
+ * here when the real gateway lands; it doubles as the fixture source for Vitest.
  */
 import { GatewayError } from '../errors'
 import type {

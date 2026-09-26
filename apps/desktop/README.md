@@ -8,10 +8,10 @@ Needs Git and Node 22 LTS (20.19+ also works). No backend, Docker or database: t
 built-in mock gateway with the synthetic spec 16 seed.
 
 ```
+npm install -g pnpm  # once per machine; pnpm then switches itself to the pinned 10.28.0
 cd apps/desktop
-corepack enable      # once per machine; provides the pinned pnpm (macOS/Linux may need sudo)
 pnpm install         # first run downloads Electron, a few minutes
-pnpm dev             # opens the Asclep window with hot reload (or `make dev-desktop` from the repo root)
+pnpm dev             # opens the Asclep window with hot reload
 ```
 
 Sign in as `reyes@asclep.demo` / `asclep-demo`. Other demo users, same password: `okafor` (nurse),
@@ -39,9 +39,15 @@ Mocks are on unless `VITE_USE_MOCKS=false`. Copy `.env.example` to `.env` to cha
 
 ## Troubleshooting
 
-- **"Cannot reach the Asclep gateway" at login:** your `.env` has `VITE_USE_MOCKS=false` but the
-  gateway is not running. Set it back to `true` or start the backend with `make up`.
-- **`pnpm: command not found`:** run `corepack enable` (Node 20.19+ ships Corepack).
+- **"Cannot reach the Asclep gateway" at login:** your `.env` has `VITE_USE_MOCKS=false`. Set it back
+  to `true` (or delete `.env`). The real gateway can't serve the app end to end yet; see
+  `docs/BACKEND_HANDOFF.md`.
+- **`pnpm: command not found`:** run `npm install -g pnpm`. Using Corepack instead? On Windows,
+  `corepack enable` needs an admin terminal (it writes to `C:\Program Files\nodejs`), and Node
+  22.12–22.13 ship a Corepack that fails with "Cannot find matching keyid"; `npm install -g
+  corepack@latest` fixes that.
+- **`make: command not found` (Windows):** Git Bash has no `make`; run `pnpm dev` in `apps/desktop`
+  instead of `make dev-desktop`.
 - **Red squiggles in VS Code but `pnpm typecheck` passes:** VS Code is using its own TypeScript.
   Open `apps/desktop` as the folder, or run "TypeScript: Select TypeScript Version" → "Use
   Workspace Version".
