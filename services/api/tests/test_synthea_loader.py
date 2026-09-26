@@ -1,5 +1,5 @@
-import json
 import importlib.util
+import json
 from pathlib import Path
 
 LOADER_PATH = Path(__file__).parents[3] / "services" / "mock-ehr" / "load_synthea.py"

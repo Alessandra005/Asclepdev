@@ -1,5 +1,0 @@
-# Code groups for relevance ranking and link rules (spec 7A.2, 7A.6). Fill from Synthea output.
-smoking_history: {loinc: ["72166-2"]}
-lung_oncology:   {snomed: []}   # TODO(Alessandra): add codes present in seed data
-respiratory:     {snomed: []}
-renal_function:  {loinc: ["2823-3", "2160-0"]}   # potassium, creatinine

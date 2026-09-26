@@ -1,10 +1,10 @@
 """Generate deterministic Synthea FHIR bundles and load them into HAPI."""
 
 import argparse
-from pathlib import Path
 import json
 import shutil
 import subprocess
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -41,7 +41,12 @@ def transaction_bundle(bundle: dict) -> dict:
 
 def post_bundle(bundle: dict, fhir_base_url: str, timeout: float = 120.0) -> None:
     """POST one transaction bundle to HAPI's transaction endpoint."""
-    request = Request(f"{fhir_base_url.rstrip('/')}/", data=json.dumps(transaction_bundle(bundle)).encode("utf-8"), method="POST", headers={"Accept": "application/fhir+json", "Content-Type": "application/fhir+json"})
+    request = Request(
+        f"{fhir_base_url.rstrip('/')}/",
+        data=json.dumps(transaction_bundle(bundle)).encode("utf-8"),
+        method="POST",
+        headers={"Accept": "application/fhir+json", "Content-Type": "application/fhir+json"},
+    )
     with urlopen(request, timeout=timeout):
         pass
 
@@ -64,7 +69,10 @@ def load_directory(bundle_dir: Path, fhir_base_url: str) -> int:
     return count
 
 
-def seed_provider(name: str, fhir_base_url: str, synthea_jar: Path, output_root: Path, patients: int = PATIENTS_PER_PROVIDER) -> int:
+def seed_provider(
+    name: str, fhir_base_url: str, synthea_jar: Path, output_root: Path,
+    patients: int = PATIENTS_PER_PROVIDER,
+) -> int:
     """Generate and load one provider's background bundles."""
     provider_dir = output_root / name
     if provider_dir.exists():
@@ -88,9 +96,15 @@ def main() -> None:
     """Generate and load both synthetic EHR populations."""
     args = parse_args()
     if args.skip_generation:
-        counts = [load_directory(args.output_root / "ehr-a" / "fhir", args.ehr_a_url), load_directory(args.output_root / "ehr-b" / "fhir", args.ehr_b_url)]
+        counts = [
+            load_directory(args.output_root / "ehr-a" / "fhir", args.ehr_a_url),
+            load_directory(args.output_root / "ehr-b" / "fhir", args.ehr_b_url),
+        ]
     else:
-        counts = [seed_provider("ehr-a", args.ehr_a_url, args.synthea_jar, args.output_root), seed_provider("ehr-b", args.ehr_b_url, args.synthea_jar, args.output_root)]
+        counts = [
+            seed_provider("ehr-a", args.ehr_a_url, args.synthea_jar, args.output_root),
+            seed_provider("ehr-b", args.ehr_b_url, args.synthea_jar, args.output_root),
+        ]
     print(f"Loaded ehr-a={counts[0]} bundles, ehr-b={counts[1]} bundles; seed={SEED}")
 
 

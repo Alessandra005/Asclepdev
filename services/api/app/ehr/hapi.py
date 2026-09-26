@@ -1,7 +1,7 @@
 """HAPI FHIR R4 adapter used by both synthetic mock EHR providers."""
 
-from datetime import date
 import json
+from datetime import date
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen

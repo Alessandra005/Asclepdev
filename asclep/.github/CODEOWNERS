@@ -1,8 +1,0 @@
-# Changes here require Ron's review (spec section 4)
-/packages/contracts/        @RON_GITHUB_USERNAME
-/services/api/migrations/   @RON_GITHUB_USERNAME
-/services/api/app/auth/     @RON_GITHUB_USERNAME
-/services/api/app/rbac/     @RON_GITHUB_USERNAME
-/services/api/app/audit/    @RON_GITHUB_USERNAME
-/infra/                     @RON_GITHUB_USERNAME
-/docs/SPEC.md               @RON_GITHUB_USERNAME
