@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:mock": "cross-env VITE_USE_MOCKS=true electron-vite dev",
+    "demo:host": "cross-env ASCLEP_DEMO_HOST=1 VITE_DEMO_SERVER=http://localhost:8787 electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",

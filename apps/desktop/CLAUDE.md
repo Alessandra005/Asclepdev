@@ -56,6 +56,13 @@ the next request fail, which is useful for rehearsing error states.
 `electron.vite.config.ts` and `e2e/demo.spec.ts` drop `ELECTRON_RUN_AS_NODE` (set by some Electron-hosted
 terminals, e.g. Claude Code in VS Code), which would otherwise start Electron as plain Node.
 
+Shared demo (two users at once): `pnpm demo:host` makes the main process serve the mock gateway over
+HTTP (`src/main/demoServer.ts`, port 8787, `/demo/*`, CORS *, LAN-visible, synthetic data only).
+Other apps pick "Shared with team" on the login screen (`DemoServerPicker`, saved per computer in
+localStorage); `client.ts` then sends mocked calls there instead of the in-window mock. The host can
+open extra windows (user menu or Ctrl+Shift+N). `__asclepMock.failNext` only affects the in-window mock.
+e2e: `e2e/shared-demo.spec.ts`. Tests run with `ASCLEP_USER_DATA` set to a temp profile.
+
 One-window mock demo (step 3): mock state lives in memory and survives sign-out (only the session, UI
 state and query cache reset), so one window can play both roles. As Dr. Reyes click Request records,
 then sign out → sign in as admin → Admin tab → Review → consent reference → Record consent → sign
