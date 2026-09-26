@@ -199,12 +199,20 @@ export const useAsk = () =>
       gateway<AskResponse>('/ask', { method: 'POST', body: req, timeoutMs: LONG })
   })
 
-export const useAudit = () => {
+/** Server-side filters from spec 15 (GET /audit: user_id, patient_id, action, from, to). */
+export interface AuditQuery {
+  patient_id?: string
+  action?: string
+  from?: string
+  to?: string
+}
+export const useAudit = (filters: AuditQuery = {}) => {
   const k = useUserKey()
   return useQuery({
-    queryKey: [k, 'audit'],
-    queryFn: () => gateway<ListResponse<AuditRow>>('/audit'),
-    refetchInterval: 5000
+    queryKey: [k, 'audit', filters],
+    queryFn: () => gateway<ListResponse<AuditRow>>('/audit', { query: { ...filters } }),
+    refetchInterval: 5000,
+    placeholderData: keepPreviousData
   })
 }
 

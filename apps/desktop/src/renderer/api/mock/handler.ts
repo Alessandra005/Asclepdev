@@ -424,10 +424,21 @@ export async function mockGateway(
   }
 
   if (method === 'GET' && path === '/audit') {
-    const rows =
+    const own =
       u.role === 'admin'
         ? state.audit
         : state.audit.filter((a) => a.actor_name === u.full_name || a.on_behalf_of === u.full_name)
+    const pid = q.get('patient_id')
+    const action = q.get('action')
+    const from = q.get('from')
+    const to = q.get('to')
+    const rows = own.filter(
+      (a) =>
+        (!pid || a.patient_name === PATIENTS[pid]?.name) &&
+        (!action || a.action === action) &&
+        (!from || a.at >= from) &&
+        (!to || a.at <= to)
+    )
     return { items: rows, next_cursor: null }
   }
 

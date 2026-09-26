@@ -333,6 +333,27 @@ body {
 .inline-spinner.bp6-spinner {
   justify-content: flex-end;
 }
+.row.wrap {
+  flex-wrap: wrap;
+}
+.audit-filters .bp6-control {
+  margin-bottom: 0;
+}
+.audit-table {
+  height: calc(100vh - 260px);
+  min-height: 240px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.audit-table .bp6-table-container {
+  flex: 1;
+  font-size: 12px;
+}
+.audit-count {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+}
 .chart-tip {
   background: var(--surface);
   border: 1px solid var(--border);
