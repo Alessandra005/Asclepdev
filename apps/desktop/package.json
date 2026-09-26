@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest run",
-    "gen:api": "openapi-typescript http://localhost:8000/openapi.json -o src/renderer/api/schema.d.ts"
+    "gen:api": "openapi-typescript http://localhost:8000/openapi.json -o src/renderer/api/schema.d.ts",
+    "test:e2e": "cross-env VITE_USE_MOCKS=true electron-vite build && playwright test"
   },
   "dependencies": {
     "@blueprintjs/core": "6.20.0",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
+    "@playwright/test": "1.63.0",
     "@testing-library/react": "16.3.3",
     "@types/node": "22.20.4",
     "@types/react": "18.3.31",

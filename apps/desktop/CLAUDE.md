@@ -45,6 +45,7 @@ pnpm install
 pnpm dev                   # Electron + hot reload; .env has VITE_USE_MOCKS=true
 pnpm test                  # Vitest: CitationChip, ReviewPanel, dashboard empty state
 pnpm typecheck && pnpm lint
+pnpm test:e2e              # Playwright: builds in mock mode, walks demo steps 1-7 in Electron (~30 s)
 pnpm gen:api               # when Ron's gateway serves /openapi.json on :8000
 ```
 
@@ -118,7 +119,7 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 4. Lab: OpenSeadragon viewer + heatmap overlay + real tiles from `GET /files/{path}`.
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).
 6. ~~Records tab (Blueprint Tree), Audit filters (Table2 + DateRangeInput).~~ Done.
-7. One Playwright e2e over demo steps 1–7 (spec 18.5).
+7. ~~One Playwright e2e over demo steps 1–7 (spec 18.5).~~ Done: `e2e/demo.spec.ts`.
 
 ## Scribe backend notes (Brandon's vlmlol prototype, reviewed earlier)
 
