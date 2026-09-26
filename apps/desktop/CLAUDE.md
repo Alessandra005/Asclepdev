@@ -106,6 +106,7 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 | How Dr. Wu opens Gregory to show "access denied" when `/patients` only lists his own patients (MRN lookup? break-the-glass?) | Demo step 9 | Ron |
 | Markdown renderer for `answer_md` is not in the library list | Ask | Ron |
 | Pending admin consent task data (Admin tab, demo step 3) | Admin tab | Ron + Alessandra |
+| `/records-tree` response shape; no encounter list route (Records tab composes existing routes for now) | Records tab | Ron + Alessandra |
 | Gateway has no CORS middleware; dev renderer runs on `http://localhost:5173` (packaged Electron sends `Origin: null`) | Every real API call | Ron |
 
 ## Next steps, in order
@@ -116,7 +117,7 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 3. Admin tab: pending consent tasks + "Record consent" (needed for demo step 3 with two windows).
 4. Lab: OpenSeadragon viewer + heatmap overlay + real tiles from `GET /files/{path}`.
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).
-6. Records tab (Blueprint Tree over `/records-tree`), Audit filters (Table2 + DateRangeInput).
+6. ~~Records tab (Blueprint Tree)~~ done; Audit filters (Table2 + DateRangeInput).
 7. One Playwright e2e over demo steps 1–7 (spec 18.5).
 
 ## Scribe backend notes (Brandon's vlmlol prototype, reviewed earlier)
