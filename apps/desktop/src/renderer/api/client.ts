@@ -5,7 +5,8 @@ import { mockGateway } from './mock/handler'
 export { GatewayError }
 
 const BASE = `${import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8000'}/api/v1`
-export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
+/** Mock gateway unless VITE_USE_MOCKS=false, so a fresh clone (no .env) runs with `pnpm dev`. */
+export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
 /**
  * Mixed mode: with mocks on, paths matching VITE_LIVE_ROUTES go to the real gateway, so endpoints can

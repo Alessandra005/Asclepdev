@@ -42,7 +42,7 @@ chose this light look, and the toggle keeps both). Tokens are in `src/renderer/s
 ```
 corepack enable            # once, gives you pnpm
 pnpm install
-pnpm dev                   # Electron + hot reload; .env has VITE_USE_MOCKS=true
+pnpm dev                   # Electron + hot reload; mock gateway unless VITE_USE_MOCKS=false (no .env needed)
 pnpm test                  # Vitest: CitationChip, ReviewPanel, dashboard empty state
 pnpm typecheck && pnpm lint
 pnpm test:e2e              # Playwright: builds in mock mode, walks demo steps 1-7 in Electron (~30 s)
@@ -52,6 +52,9 @@ pnpm gen:api               # when Ron's gateway serves /openapi.json on :8000
 Mock mode needs no backend. Demo users all use password `asclep-demo`: reyes (attending), okafor
 (nurse), wu (not on Gregory's team), lab, admin. In DevTools, `__asclepMock.failNext = true` makes
 the next request fail, which is useful for rehearsing error states.
+
+`electron.vite.config.ts` and `e2e/demo.spec.ts` drop `ELECTRON_RUN_AS_NODE` (set by some Electron-hosted
+terminals, e.g. Claude Code in VS Code), which would otherwise start Electron as plain Node.
 
 One-window mock demo (step 3): mock state lives in memory and survives sign-out (only the session, UI
 state and query cache reset), so one window can play both roles. As Dr. Reyes click Request records,

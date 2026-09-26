@@ -3,6 +3,10 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 let app: ElectronApplication
 let page: Page
 
+// See electron.vite.config.ts: an inherited ELECTRON_RUN_AS_NODE would start Electron as plain Node.
+const { ELECTRON_RUN_AS_NODE: _runAsNode, ...parentEnv } = process.env
+void _runAsNode
+
 test.beforeAll(async () => {
   app = await electron.launch({
     // Fake camera so the Scribe step runs without hardware. Audio stays denied by the main process.
@@ -13,7 +17,7 @@ test.beforeAll(async () => {
       // GitHub's Ubuntu runners block Electron's sandbox; local runs keep it.
       ...(process.env['CI'] ? ['--no-sandbox'] : [])
     ],
-    env: { ...process.env, ELECTRON_RENDERER_URL: '' }
+    env: { ...parentEnv, ELECTRON_RENDERER_URL: '' }
   })
   page = await app.firstWindow()
 })
