@@ -6,7 +6,13 @@ let page: Page
 test.beforeAll(async () => {
   app = await electron.launch({
     // Fake camera so the Scribe step runs without hardware. Audio stays denied by the main process.
-    args: ['out/main/index.js', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+    args: [
+      'out/main/index.js',
+      '--use-fake-device-for-media-stream',
+      '--use-fake-ui-for-media-stream',
+      // GitHub's Ubuntu runners block Electron's sandbox; local runs keep it.
+      ...(process.env['CI'] ? ['--no-sandbox'] : [])
+    ],
     env: { ...process.env, ELECTRON_RENDERER_URL: '' }
   })
   page = await app.firstWindow()

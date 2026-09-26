@@ -12,3 +12,20 @@ jobs:
       - run: ruff check packages services
       - run: pip install -e packages/contracts -e "services/api[dev]"
       - run: pytest services/api/tests -q
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      # Demo steps 1-7 in Electron on the mock gateway; xvfb gives Electron a display.
+      - run: xvfb-run -a pnpm test:e2e
