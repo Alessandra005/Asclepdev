@@ -1,0 +1,48 @@
+services:
+  ehr-a-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: hapi
+      POSTGRES_PASSWORD: hapi
+    volumes:
+      - ehr-a-db:/var/lib/postgresql/data
+  ehr-a:
+    image: hapiproject/hapi:v7.6.0
+    ports:
+      - "8080:8080"
+    environment:
+      spring.datasource.url: jdbc:postgresql://ehr-a-db:5432/hapi
+      spring.datasource.username: hapi
+      spring.datasource.password: hapi
+      spring.datasource.driver-class-name: org.postgresql.Driver
+      spring.jpa.properties.hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+      hapi.fhir.fhir_version: R4
+      hapi.fhir.tester.home.name: Riverside Family Medicine
+    depends_on:
+      - ehr-a-db
+  ehr-b-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: hapi
+      POSTGRES_PASSWORD: hapi
+    volumes:
+      - ehr-b-db:/var/lib/postgresql/data
+  ehr-b:
+    image: hapiproject/hapi:v7.6.0
+    ports:
+      - "8081:8080"
+    environment:
+      spring.datasource.url: jdbc:postgresql://ehr-b-db:5432/hapi
+      spring.datasource.username: hapi
+      spring.datasource.password: hapi
+      spring.datasource.driver-class-name: org.postgresql.Driver
+      spring.jpa.properties.hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+      hapi.fhir.fhir_version: R4
+      hapi.fhir.tester.home.name: Northside Oncology & Urology
+    depends_on:
+      - ehr-b-db
+volumes:
+  ehr-a-db:
+  ehr-b-db:
