@@ -7,8 +7,12 @@ import { GatewayError } from '../errors'
 import type {
   AskResponse,
   AuditRow,
+  ConsentDecision,
+  ConsentTask,
+  DashboardResponse,
   ErrorCode,
   Finding,
+  ListResponse,
   LoginResponse,
   MeResponse,
   Note,
@@ -18,6 +22,7 @@ import type {
   ScribeObservation,
   ScribeSession,
   ScribeWindow,
+  TranscriptRequest,
   User
 } from '../types'
 import {
@@ -38,18 +43,25 @@ import {
   LINDA_NOTES,
   PRIYA_MEDS,
   PATIENTS,
+  RIVERSIDE_RESOURCES,
   ROLE_PERMISSIONS,
   SCRIBE_SCRIPT,
   SOURCE_RECORDS,
   SUMMARY_AFTER,
   SUMMARY_BEFORE,
+  TRANSCRIPT_PROVIDERS,
   USERS
 } from './data'
 
-// ---- mutable demo state (reset on reload)
+/** A transcript_request row plus mock-only fields: who asked (DDL requested_by) and when consent landed. */
+type MockTranscript = ConsentTask & { requested_by: string; consented_ms: number | null }
+
+// ---- mutable demo state (reset on reload; survives sign-out, so one window can play both roles)
 const state = {
+  /** True once Gregory's Riverside request reaches 'merged'. Computed only in refreshTranscripts(). */
   merged: false,
-  transcriptRequestedAt: null as number | null,
+  /** Newest first. */
+  transcripts: [] as MockTranscript[],
   finding: structuredClone(GREGORY_FINDING) as Finding,
   reportGenerated: false,
   audit: structuredClone(AUDIT_SEED) as AuditRow[],
@@ -68,7 +80,9 @@ const state = {
 }
 ;(globalThis as unknown as { __asclepMock: typeof state }).__asclepMock = state
 
-const MERGE_DELAY_MS = 4000
+/** Mock ingestion worker timing after consent (spec 11): pull the bundle, then merge it. */
+const FETCHED_AFTER_MS = 1500
+const MERGED_AFTER_MS = 3500
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const fail = (status: number, code: ErrorCode, message: string): never => {
   throw new GatewayError(status, code, message, 'req_mock_' + Math.random().toString(36).slice(2, 7))
@@ -152,17 +166,60 @@ function draftNote(obs: ScribeObservation[], secs: number, windows: number, cons
   ].join('\n')
 }
 
-function checkMerge(): void {
-  if (
-    !state.merged &&
-    state.transcriptRequestedAt &&
-    Date.now() - state.transcriptRequestedAt > MERGE_DELAY_MS
-  ) {
-    state.merged = true
+/**
+ * Mock ingestion worker (spec 11 steps 4-7): consented -> fetched -> merged, derived from the time since
+ * consent so no timers run. Called once per request, and the only place that sets state.merged.
+ */
+function refreshTranscripts(): void {
+  const now = Date.now()
+  for (const t of state.transcripts) {
+    if (t.consented_ms === null || t.status === 'merged' || t.status === 'denied') continue
+    const elapsed = now - t.consented_ms
+    if (elapsed >= MERGED_AFTER_MS) {
+      t.status = 'merged'
+      t.resources_imported = RIVERSIDE_RESOURCES[t.patient_id] ?? 0
+      t.completed_at = new Date(t.consented_ms + MERGED_AFTER_MS).toISOString()
+    } else if (elapsed >= FETCHED_AFTER_MS) {
+      t.status = 'fetched'
+    }
+  }
+  state.merged = state.transcripts.some((t) => t.patient_id === IDS.gregory && t.status === 'merged')
+}
+const toRequest = (t: MockTranscript): TranscriptRequest => ({
+  id: t.id,
+  patient_id: t.patient_id,
+  from_provider: t.from_provider,
+  status: t.status,
+  consent_ref: t.consent_ref,
+  resources_imported: t.resources_imported,
+  created_at: t.created_at,
+  completed_at: t.completed_at
+})
+const toTask = (t: MockTranscript): ConsentTask => ({
+  ...toRequest(t),
+  patient_name: t.patient_name,
+  patient_mrn: t.patient_mrn,
+  requested_by_name: t.requested_by_name
+})
+/** Spec 11 step 7: once merged, the physician's "Request Riverside records" task becomes a review task. */
+function dashboardView(u: (typeof USERS)[number]): DashboardResponse {
+  const merged = state.transcripts.find((t) => t.patient_id === IDS.gregory && t.status === 'merged')
+  if (!merged || u.role !== 'physician') return DASHBOARD
+  return {
+    ...DASHBOARD,
+    tasks: DASHBOARD.tasks.map((t) =>
+      t.kind === 'review_transcript' && t.patient_id === IDS.gregory
+        ? {
+            ...t,
+            id: 't-review-' + merged.id,
+            title: 'Review Riverside records',
+            detail: `${merged.resources_imported} records merged from ${merged.from_provider}.`
+          }
+        : t
+    )
   }
 }
 function patientView(id: string): Patient {
-  checkMerge()
   const p = PATIENTS[id]
   if (!p) return fail(404, 'NOT_FOUND', 'Patient not found.')
   return id === IDS.gregory && state.merged ? { ...p, ...GREGORY_AFTER_MERGE } : p
@@ -182,6 +239,7 @@ export async function mockGateway(
     state.failNext = false
     fail(502, 'UPSTREAM_UNAVAILABLE', 'Mock failure (rehearsal). Try again.')
   }
+  refreshTranscripts()
   const m = (re: RegExp): RegExpMatchArray | null => path.match(re)
   let r: RegExpMatchArray | null
 
@@ -205,7 +263,7 @@ export async function mockGateway(
       fail(403, 'FORBIDDEN_ROLE', 'Dashboard is for clinicians.')
     if (u.id === 'u-wu')
       return { attention: [], schedule: [], tasks: [], recent_patients: [], supply_watch: [] }
-    return DASHBOARD
+    return dashboardView(u)
   }
   if (method === 'GET' && path === '/patients') {
     const term = (q.get('q') ?? '').toLowerCase()
@@ -221,7 +279,6 @@ export async function mockGateway(
   }
   if ((r = m(/^\/patients\/([^/]+)\/summary$/))) {
     requireCareTeam(u, r[1]!, 'summary')
-    checkMerge()
     return r[1] === IDS.gregory
       ? state.merged
         ? SUMMARY_AFTER
@@ -231,7 +288,6 @@ export async function mockGateway(
   if ((r = m(/^\/patients\/([^/]+)\/observations$/)) && method === 'GET') {
     requireCareTeam(u, r[1]!, 'observation')
     requirePerm(u, 'view_labs')
-    checkMerge()
     const all =
       r[1] === IDS.gregory
         ? [...GREGORY_LABS_NORTHSIDE, ...(state.merged ? GREGORY_LABS_RIVERSIDE : [])]
@@ -251,7 +307,6 @@ export async function mockGateway(
   }
   if ((r = m(/^\/patients\/([^/]+)\/medications$/)) && method === 'GET') {
     requireCareTeam(u, r[1]!, 'medication_request')
-    checkMerge()
     const items =
       r[1] === IDS.gregory
         ? state.merged
@@ -265,7 +320,6 @@ export async function mockGateway(
   if ((r = m(/^\/patients\/([^/]+)\/notes$/)) && method === 'GET') {
     requireCareTeam(u, r[1]!, 'note')
     requirePerm(u, 'view_notes')
-    checkMerge()
     const pid = r[1]!
     const seeded =
       pid === IDS.gregory
@@ -280,19 +334,69 @@ export async function mockGateway(
     const items = [...scribe, ...seeded].filter((n) => !q.get('kind') || n.kind === q.get('kind'))
     return { items, next_cursor: null }
   }
+  // ---- Transcript requests (spec 11): requested -> consented -> fetched -> merged, or requested -> denied
   if ((r = m(/^\/patients\/([^/]+)\/transcripts$/))) {
-    requireCareTeam(u, r[1]!, method === 'POST' ? 'transcript_request' : null)
+    const pid = r[1]!
+    requireCareTeam(u, pid, method === 'POST' ? 'transcript_request' : null)
+    const patient = PATIENTS[pid] ?? fail(404, 'NOT_FOUND', 'Patient not found.')
+    const own = state.transcripts.filter((t) => t.patient_id === pid)
     if (method === 'POST') {
       requirePerm(u, 'request_transcripts')
-      state.transcriptRequestedAt ??= Date.now()
-      audit(u, 'write', 'transcript_request', PATIENTS[r[1]!]?.name ?? null)
+      const { from_provider_id } = (body ?? {}) as { from_provider_id?: string }
+      const from =
+        TRANSCRIPT_PROVIDERS[from_provider_id ?? ''] ??
+        fail(422, 'VALIDATION_ERROR', 'Unknown from_provider_id.')
+      // Mock-only demo choice (not a spec rule; spec 11 step 4 allows incremental re-requests after a
+      // merge): return the open or merged request instead of a duplicate. A denial allows a new one.
+      const latest = own.find((t) => t.from_provider === from)
+      if (latest && latest.status !== 'denied') return toRequest(latest)
+      const t: MockTranscript = {
+        id: uid(),
+        patient_id: pid,
+        patient_name: patient.name,
+        patient_mrn: patient.mrn,
+        from_provider: from,
+        status: 'requested',
+        consent_ref: null,
+        resources_imported: 0,
+        created_at: new Date().toISOString(),
+        completed_at: null,
+        requested_by: u.id,
+        requested_by_name: u.full_name,
+        consented_ms: null
+      }
+      state.transcripts.unshift(t)
+      audit(u, 'request_transcript', 'transcript_request', patient.name)
+      return toRequest(t)
     }
-    checkMerge()
-    const status = state.merged ? 'merged' : state.transcriptRequestedAt ? 'awaiting_consent' : 'none'
-    return {
-      items: status === 'none' ? [] : [{ id: 'tr-1', from_provider: 'Riverside Family Medicine', status }],
-      next_cursor: null
+    return { items: own.map(toRequest), next_cursor: null } satisfies ListResponse<TranscriptRequest>
+  }
+  if ((r = m(/^\/transcripts\/([^/]+)\/consent$/)) && method === 'POST') {
+    requirePerm(u, 'record_consent')
+    const id = r[1]!
+    const t =
+      state.transcripts.find((x) => x.id === id) ?? fail(404, 'NOT_FOUND', 'Transcript request not found.')
+    if (t.status !== 'requested') fail(409, 'CONFLICT', 'This request was already decided.')
+    const { consent_ref, granted } = (body ?? {}) as Partial<ConsentDecision>
+    const ref = typeof consent_ref === 'string' ? consent_ref.trim() : ''
+    // The spec 15 body always carries consent_ref, so a denial needs a reference too.
+    if (!ref) fail(422, 'VALIDATION_ERROR', 'A consent reference is required.')
+    if (typeof granted !== 'boolean') fail(422, 'VALIDATION_ERROR', 'granted must be true or false.')
+    t.consent_ref = ref
+    if (granted) {
+      t.status = 'consented'
+      t.consented_ms = Date.now()
+    } else {
+      t.status = 'denied'
+      t.completed_at = new Date().toISOString()
     }
+    audit(u, granted ? 'record_consent' : 'deny_consent', 'transcript_request', t.patient_name)
+    return toRequest(t)
+  }
+  // ---- SPEC-QUESTION: admin consent queue. Mock-only path until Ron + Alessandra define the route.
+  if (method === 'GET' && path === '/__mock/admin/consent-tasks') {
+    requirePerm(u, 'record_consent')
+    return { items: state.transcripts.map(toTask), next_cursor: null } satisfies ListResponse<ConsentTask>
   }
   if ((r = m(/^\/patients\/([^/]+)\/findings$/))) {
     requireCareTeam(u, r[1]!, 'finding')

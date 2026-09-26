@@ -49,9 +49,10 @@ export function App() {
   useEffect(() => {
     if (!me.data) return
     setMe(me.data.role, me.data.permissions)
-    // Role-specific landing (spec 16 / kickoff p.2): clinicians -> Dashboard, admin -> Audit, lab -> Lab.
+    // Role-specific landing (spec 16 / kickoff p.2): clinicians -> Dashboard, lab -> Lab, and admin ->
+    // Admin, where the pending records-consent queue lives (demo step 3).
     const landing: TabId =
-      me.data.role === 'admin' ? 'audit' : me.data.role === 'lab_staff' ? 'lab' : 'dashboard'
+      me.data.role === 'admin' ? 'admin' : me.data.role === 'lab_staff' ? 'lab' : 'dashboard'
     setTab(landing)
   }, [me.data, setMe, setTab])
 

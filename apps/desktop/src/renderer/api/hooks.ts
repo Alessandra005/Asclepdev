@@ -1,11 +1,13 @@
 /** Every server call goes through a TanStack Query hook here (spec 18.3). Keys are scoped by user. */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { gateway, USE_MOCKS, GatewayError } from './client'
+import { gateway, isMocked, USE_MOCKS, GatewayError } from './client'
 import { useSession } from '@/state/session'
 import type {
   AskResponse,
   AuditRow,
   Citation,
+  ConsentDecision,
+  ConsentTask,
   DashboardResponse,
   Finding,
   ListResponse,
@@ -23,7 +25,9 @@ import type {
   ScribeSession,
   ScribeStopResponse,
   ScribeWindow,
-  SourceRecord
+  SourceRecord,
+  TranscriptRequest,
+  TranscriptStatus
 } from './types'
 
 const LONG = 120_000 // spec 15: classify/report are synchronous with a 120 s timeout
@@ -113,15 +117,16 @@ export const usePatientNotes = (id: string | null) => {
   })
 }
 
-type TranscriptStatus = { id: string; from_provider: string; status: 'awaiting_consent' | 'merged' }
+/** Statuses the ingestion worker is still moving (spec 11): keep polling until merged or denied. */
+const IN_FLIGHT: TranscriptStatus[] = ['requested', 'consented', 'fetched']
 export const useTranscripts = (id: string | null) => {
   const k = useUserKey()
   return useQuery({
     queryKey: [k, 'patient', id, 'transcripts'],
-    queryFn: () => gateway<ListResponse<TranscriptStatus>>(`/patients/${id}/transcripts`),
+    queryFn: () => gateway<ListResponse<TranscriptRequest>>(`/patients/${id}/transcripts`),
     enabled: !!id,
-    // Poll only while waiting on admin consent; stop once merged.
-    refetchInterval: (q) => (q.state.data?.items.some((t) => t.status === 'awaiting_consent') ? 2000 : false)
+    // Poll while a request waits on admin consent or is importing; stop once merged or denied.
+    refetchInterval: (q) => (q.state.data?.items.some((t) => IN_FLIGHT.includes(t.status)) ? 2000 : false)
   })
 }
 
@@ -131,11 +136,45 @@ export const useRequestTranscript = (patientId: string) => {
   return useMutation({
     // SPEC-QUESTION: from_provider_id for Riverside comes from a provider list the spec does not expose yet.
     mutationFn: () =>
-      gateway(`/patients/${patientId}/transcripts`, {
+      gateway<TranscriptRequest>(`/patients/${patientId}/transcripts`, {
         method: 'POST',
         body: { from_provider_id: 'riverside' }
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [k, 'patient', patientId, 'transcripts'] })
+  })
+}
+
+/**
+ * SPEC-QUESTION: spec 11 says the gateway creates "a task for the admin", but spec 15 has no route
+ * that lists pending consent tasks. Mocks serve /__mock/admin/consent-tasks; against the real gateway
+ * this shows an honest error until Ron + Alessandra define the route. Do not guess a route.
+ */
+const CONSENT_QUEUE_PATH = '/__mock/admin/consent-tasks'
+const consentQueueWired = isMocked(CONSENT_QUEUE_PATH)
+export const useConsentTasks = () => {
+  const k = useUserKey()
+  return useQuery({
+    queryKey: [k, 'consent-tasks'],
+    queryFn: () => {
+      if (!consentQueueWired)
+        throw new GatewayError(501, 'NOT_FOUND', 'Consent queue is not wired to the gateway yet.', null)
+      return gateway<ListResponse<ConsentTask>>(CONSENT_QUEUE_PATH)
+    },
+    // Requests made under another login (the physician's window) show up without a reload.
+    refetchInterval: consentQueueWired ? 3000 : false,
+    retry: consentQueueWired ? 3 : false
+  })
+}
+
+/** POST /transcripts/{id}/consent (admin only). Record consent or deny; both carry a consent_ref. */
+export const useRecordConsent = () => {
+  const qc = useQueryClient()
+  const k = useUserKey()
+  return useMutation({
+    mutationFn: ({ requestId, decision }: { requestId: string; decision: ConsentDecision }) =>
+      gateway<TranscriptRequest>(`/transcripts/${requestId}/consent`, { method: 'POST', body: decision }),
+    // The queue changes only after the gateway confirms: no optimistic update.
+    onSuccess: () => qc.invalidateQueries({ queryKey: [k, 'consent-tasks'] })
   })
 }
 

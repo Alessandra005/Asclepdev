@@ -54,7 +54,9 @@ All lists are `{items, next_cursor}`. Every clinical object carries
 | `GET /patients/{id}/medications` | `id, medication (display name), status, dosage_text, effective_at, inventory{status: 'in_stock' \| 'low' \| 'backordered', on_hand, expected_restock_at} \| null` |
 | `GET /patients/{id}/notes` | `id, kind, title, body, author_name, effective_at, is_legal_record, status` |
 | `GET /patients/{id}/findings` | `Finding` in types.ts: model label + confidence are never rewritten; review sets `final_label, review_note, reviewed_by (name), reviewed_at` |
-| `GET /patients/{id}/transcripts` | `id, from_provider (display name), status ('awaiting_consent' \| 'merged')` |
+| `GET /patients/{id}/transcripts` | `TranscriptRequest`, newest first (the UI reads the first item as the latest): `id, patient_id, from_provider (display name), status, consent_ref, resources_imported, created_at, completed_at`. `status` uses the DDL values `'requested' \| 'consented' \| 'fetched' \| 'merged' \| 'denied'`. The UI polls every 2 s while the latest is requested, consented or fetched |
+| `POST /patients/{id}/transcripts {from_provider_id}` | One `TranscriptRequest` (the UI then reads the newest item of the list). A new request after a merge must stay allowed: spec 11 step 4 pulls only resources newer than the last merged request from that provider. Mock-only demo choice, not a spec rule: the mock returns the patient's open or merged request instead of creating another, and creates a new one only after `denied` |
+| `POST /transcripts/{id}/consent {consent_ref, granted}` | The updated `TranscriptRequest` (`consented` or `denied`). Errors the UI shows: 403 `FORBIDDEN_ROLE` for non-admins, 404, 409 `CONFLICT` when the status is no longer `requested`, 422 `VALIDATION_ERROR` for a blank `consent_ref` (a denial needs one too, since the body always carries it). Set `completed_at` on merge or denial |
 | `GET /audit?patient_id&action&from&to` | `id, at, actor_name, actor_kind, on_behalf_of, action, object_type, patient_name, allowed, ran_on` |
 
 `null` means "the source did not say". The UI never turns it into a negative ("None", "Normal",
@@ -68,5 +70,12 @@ All lists are `{items, next_cursor}`. Every clinical object carries
   `on_behalf_of_user_id` and `ran_on` columns.
 - **Citations:** there's no route to fetch the record a citation points to (the mock uses `/__mock/sources/{id}`).
 - **`/records-tree`** response shape, and an encounter list route.
-- **`from_provider_id`** for transcript requests (no provider list), and admin consent-task data.
+- **`from_provider_id`** for transcript requests: there's no provider list, so the UI sends `'riverside'`.
+- **Admin consent queue** (Admin tab, demo step 3): spec 11 says the gateway creates "a task for the
+  admin", but no route lists those tasks. The route name is Ron's call. The UI needs
+  `{items: ConsentTask[], next_cursor}` with every status, newest first (it splits pending from recently
+  decided). `ConsentTask` is a `TranscriptRequest` plus `patient_name, patient_mrn, requested_by_name`:
+  demographics only, since admins cannot read clinical data. The mock serves this at
+  `/__mock/admin/consent-tasks`. Against the real gateway, the Admin tab shows "Consent queue is not
+  wired to the gateway yet." until the route exists.
 - **Dr. Wu's access-denied path** (demo step 9), and the slide tile/heatmap source for OpenSeadragon.

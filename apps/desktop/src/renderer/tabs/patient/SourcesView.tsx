@@ -1,7 +1,8 @@
 import { Card, HTMLTable, Spinner, Tag } from '@blueprintjs/core'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { usePatientMedications, usePatientNotes, usePatientObservations, useTranscripts } from '@/api/hooks'
-import type { Patient, Provenance, SourceChip } from '@/api/types'
+import type { Patient, Provenance, SourceChip, TranscriptRequest } from '@/api/types'
+import { transferStatus } from './transferStatus'
 
 /** undefined = still loading, null = could not load (never shown as zero). */
 export type RecordSet = { provenance: Provenance }[] | null | undefined
@@ -22,7 +23,7 @@ export function SourcesView({ patient }: { patient: Patient }) {
         meds: settled(meds, (d) => d.items),
         notes: settled(notes, (d) => d.items)
       }}
-      transfers={transfers.data?.items ?? []}
+      transfers={transfers.isError ? null : transfers.data?.items}
     />
   )
 }
@@ -35,7 +36,8 @@ export function SourcesPanel({
 }: {
   sources: SourceChip[]
   records: { labs: RecordSet; meds: RecordSet; notes: RecordSet }
-  transfers: { id: string; from_provider: string; status: 'awaiting_consent' | 'merged' }[]
+  /** Same convention as RecordSet: undefined = loading, null = could not load (never "none requested"). */
+  transfers: TranscriptRequest[] | null | undefined
 }) {
   return (
     <div className="grid">
@@ -79,17 +81,26 @@ export function SourcesPanel({
         <div className="card-head">
           <span className="card-title">Records transfers</span>
         </div>
-        {transfers.length === 0 ? (
+        {transfers === undefined ? (
+          <div className="state-center">
+            <Spinner size={24} />
+          </div>
+        ) : transfers === null ? (
+          <p className="small muted">Transfers unavailable.</p>
+        ) : transfers.length === 0 ? (
           <p className="small muted">No transfer requested.</p>
         ) : (
-          transfers.map((t) => (
-            <div key={t.id} className="task-row">
-              <span>{t.from_provider}</span>
-              <Tag minimal intent={t.status === 'merged' ? 'success' : 'warning'}>
-                {t.status === 'merged' ? 'Merged' : 'Awaiting admin consent'}
-              </Tag>
-            </div>
-          ))
+          transfers.map((t) => {
+            const s = transferStatus(t)
+            return (
+              <div key={t.id} className="task-row">
+                <span>{t.from_provider}</span>
+                <Tag minimal intent={s.intent}>
+                  {s.text}
+                </Tag>
+              </div>
+            )
+          })
         )}
       </Card>
     </div>
