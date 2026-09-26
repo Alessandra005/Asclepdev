@@ -1,0 +1,5 @@
+medication_name,on_hand,reorder_point,backordered,expected_restock_offset_days
+Pembrolizumab 100 mg/4 mL,0,5,true,6
+Carboplatin 450 mg/45 mL,14,5,false,
+Pemetrexed 500 mg,3,5,false,2
+Albuterol inhaler,40,10,false,
