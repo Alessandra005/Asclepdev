@@ -102,6 +102,14 @@ def test_report_retries_once_then_substitutes_locked_values(claude):
     assert {str(c.id) for c in r.citations} == {str(FINDING_ID), str(SMOKING), str(COPD), str(ALLERGY)}
 
 
+def test_report_rejects_malformed_citation_ids(claude):
+    bad = sections("Former smoker with 40 pack-years.")
+    bad.parsed_output.context[0].cite = [f"Observation:{SMOKING}"]
+    claude([bad, sections("Former smoker with 40 pack-years.")])
+    r = report.draft(report_request())
+    assert r.attempts == 2 and "Observation:Observation" not in r.body_md
+
+
 def test_report_falls_back_to_template_after_three_failures(claude):
     claude([sections("Confidence was 95%.")] * 3)
     r = report.draft(report_request())
