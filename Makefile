@@ -31,6 +31,7 @@ mongo-ui:       ## browse the LiveScribing MongoDB at http://localhost:8082 (loc
 test:          ## all backend + frontend tests (spec 18.2)
 	pytest services/api/tests -q
 	cd services/resident && pytest tests -q
+	cd services/lab-tech && pytest tests -q
 	cd apps/desktop && pnpm typecheck && pnpm lint && pnpm test
 
 gen-api:       ## regenerate TS types from gateway OpenAPI - Daniel

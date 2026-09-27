@@ -17,6 +17,8 @@ data/embeddings/*
 !data/embeddings/.gitkeep
 data/heatmaps/*
 !data/heatmaps/.gitkeep
+data/thumbs/*
+data/tiles/*
 data/generated/
 tools/*.jar
 # private docs

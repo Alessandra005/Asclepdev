@@ -14,6 +14,9 @@ jobs:
       - run: pytest services/api/tests -q
       - run: pip install "mellea==0.8.0"  # same pin as services/resident/Dockerfile
       - run: pytest services/resident/tests -q
+      # lab-tech is its own pytest session: it also has a top-level `app` package
+      - run: pip install "numpy==2.5.3" "pillow==12.3.0"  # same pins as services/lab-tech/Dockerfile
+      - run: pytest services/lab-tech/tests -q
   desktop:
     runs-on: ubuntu-latest
     defaults:
