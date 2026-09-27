@@ -51,7 +51,14 @@ export const useMe = (enabled: boolean) => {
 
 export const useDashboard = () => {
   const k = useUserKey()
-  return useQuery({ queryKey: [k, 'dashboard'], queryFn: () => gateway<DashboardResponse>('/dashboard') })
+  // Gated on the permission so an admin's first render (before the landing redirect) never calls it.
+  const allowed = useSession((s) => s.permissions.includes('view_dashboard'))
+  return useQuery({
+    queryKey: [k, 'dashboard'],
+    queryFn: () => gateway<DashboardResponse>('/dashboard'),
+    enabled: allowed,
+    staleTime: 0 // "what needs me now": always fresh on open, e.g. a SOURCE_CONFLICT right after a merge
+  })
 }
 
 export const usePatientSearch = (q: string) => {

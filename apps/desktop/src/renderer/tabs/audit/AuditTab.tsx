@@ -2,6 +2,9 @@ import { useState, type ReactNode } from 'react'
 import { Button, HTMLSelect, Switch, Tag } from '@blueprintjs/core'
 import { DateRangeInput } from '@blueprintjs/datetime'
 import { Cell, Column, Table2 } from '@blueprintjs/table'
+
+/** Blueprint's default loader dynamic-imports date-fns locales, which the bundle can't resolve; undefined = built-in en-US. */
+const builtInLocale = () => Promise.resolve(undefined)
 import { useAudit, usePatientSearch } from '@/api/hooks'
 import type { AuditRow, PatientListItem } from '@/api/types'
 import { LocalProcessingPill } from '@/components/LocalProcessingPill'
@@ -88,6 +91,7 @@ export function AuditFilters({
         value={value.range}
         onChange={(range) => set({ range })}
         dateFnsFormat="yyyy-MM-dd"
+        dateFnsLocaleLoader={builtInLocale}
         shortcuts={false}
         allowSingleDayRange
         startInputProps={{ placeholder: 'From', 'aria-label': 'From date' }}

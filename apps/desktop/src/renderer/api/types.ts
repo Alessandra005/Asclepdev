@@ -289,7 +289,8 @@ export interface Report {
   id: Uuid
   finding_id: Uuid
   status: 'draft' | 'final'
-  sentences: { text: string; citation_ids: string[] }[]
+  /** kind 'heading' = a spec 10.1 section title; missing = a sentence. */
+  sentences: { text: string; citation_ids: string[]; kind?: 'heading' | 'sentence' }[]
   citations: Citation[]
 }
 export type ReviewAction = 'confirm' | 'override' | 'reject'

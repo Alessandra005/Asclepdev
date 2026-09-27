@@ -413,7 +413,9 @@ export const GREGORY_REPORT: Report = {
   finding_id: IDS.gregoryFinding,
   status: 'draft',
   sentences: [
+    { text: 'AI finding (unverified)', citation_ids: [], kind: 'heading' },
     { text: 'Finding: LUAD (adenocarcinoma); model confidence 87%.', citation_ids: ['c-finding'] },
+    { text: 'Relevant patient context', citation_ids: [], kind: 'heading' },
     { text: 'Relevant context: former smoker, 40 pack-years.', citation_ids: ['c-smoking'] },
     { text: 'History of COPD recorded by Riverside.', citation_ids: ['c-copd'] }
   ],

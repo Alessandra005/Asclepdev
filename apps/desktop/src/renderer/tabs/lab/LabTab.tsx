@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button, Card, FileInput, NonIdealState, ProgressBar, Slider } from '@blueprintjs/core'
 import { useClassify, useDraftReport, useFindings, useReviewFinding, useSlides } from '@/api/hooks'
-import type { Finding, Patient, Slide } from '@/api/types'
+import type { Finding, Patient, Report, Slide } from '@/api/types'
 import { AiDraftBlock } from '@/components/AiDraftBlock'
 import { AuthedImage } from '@/components/AuthedImage'
 import { CitationChip } from '@/components/CitationChip'
@@ -12,7 +12,37 @@ import { ReviewPanel } from '@/components/ReviewPanel'
 import { useSession } from '@/state/session'
 
 export function LabTab() {
+  const canRun = useSession((s) => s.can('run_lab_technician'))
+  // Spec 13: nurses cannot run or view the Lab Technician; say so instead of showing a 403.
+  if (!canRun) return <LabNotForRole />
   return <RequirePatient>{(p) => <LabBody patient={p} />}</RequirePatient>
+}
+
+/** Spec 10.1 fixed headings render as section labels; anything without a kind is a sentence. */
+export function ReportSentences({ sentences }: { sentences: Report['sentences'] }) {
+  return (
+    <>
+      {sentences.map((s, i) =>
+        s.kind === 'heading' ? (
+          <div key={i} className="label">
+            {s.text}
+          </div>
+        ) : (
+          <p key={i}>{s.text}</p>
+        )
+      )}
+    </>
+  )
+}
+
+export function LabNotForRole() {
+  return (
+    <NonIdealState
+      icon="lab-test"
+      title="The Lab tab is for physicians and lab staff"
+      description="Findings you can see are on the patient's Findings tab."
+    />
+  )
 }
 
 function LabBody({ patient }: { patient: Patient }) {
@@ -188,9 +218,7 @@ function SlideWorkspace({
                   </div>
                 }
               >
-                {report.sentences.map((s) => (
-                  <p key={s.text}>{s.text}</p>
-                ))}
+                <ReportSentences sentences={report.sentences} />
               </AiDraftBlock>
             )}
           </>

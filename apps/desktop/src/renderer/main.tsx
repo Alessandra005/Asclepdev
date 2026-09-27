@@ -8,10 +8,18 @@ import '@blueprintjs/select/lib/css/blueprint-select.css'
 import '@blueprintjs/datetime/lib/css/blueprint-datetime.css'
 import '@blueprintjs/table/lib/css/table.css'
 import './styles.css'
+import { GatewayError } from '@/api/errors'
 import { App } from './App'
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } }
+  defaultOptions: {
+    queries: {
+      staleTime: 15_000,
+      refetchOnWindowFocus: false,
+      // A 4xx (denied, not found) will not change on retry; only retry network and 5xx failures once.
+      retry: (n, e) => !(e instanceof GatewayError && e.status > 0 && e.status < 500) && n < 1
+    }
+  }
 })
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

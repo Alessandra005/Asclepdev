@@ -438,7 +438,7 @@ function PastSessions({
       <QueryState
         query={q}
         isEmpty={(d) => d.items.length === 0}
-        empty={{ icon: 'record', title: 'No LiveScribing sessions yet' }}
+        empty={{ icon: 'mobile-video', title: 'No LiveScribing sessions yet' }}
       >
         {(d) => (
           <HTMLTable compact className="table-fill">
