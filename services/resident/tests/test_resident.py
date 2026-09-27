@@ -60,6 +60,11 @@ def test_uncited_sentence_fails():
     assert validate.every_claim_cited("Potassium was 6.4 mmol/L this morning.")
     assert validate.every_claim_cited(f"Potassium was 6.4 mmol/L [[obj:Observation:{oid}]].") == []
     assert validate.every_claim_cited("You don't have access to that record.") == []
+    assert validate.every_claim_cited("You may want to check with pathology directly.") == []  # not a claim
+    assert validate.every_claim_cited("Pembrolizumab is backordered.")
+    assert validate.every_claim_cited("The biopsy shows adenocarcinoma.")
+    assert validate.every_claim_cited("Gregory Hale is scheduled today.", {"gregory"})
+    assert validate.citations_well_formed("No findings on file [[obj:Finding:none]].")
 
 
 def test_dosing_numbers_and_foreign_citations_fail():

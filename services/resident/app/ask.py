@@ -14,7 +14,15 @@ from uuid import UUID, uuid4
 import httpx
 
 from app import llm
-from app.validate import CITE, citations_resolve, every_claim_cited, length_limit, no_dosing, numbers_grounded
+from app.validate import (
+    CITE,
+    citations_resolve,
+    citations_well_formed,
+    every_claim_cited,
+    length_limit,
+    no_dosing,
+    numbers_grounded,
+)
 from asclep_contracts import AskAnswer, AskRequest, Citation
 
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://api:8000/api/v1").rstrip("/")
@@ -32,7 +40,8 @@ SYSTEM = """You are the Resident in Asclep, answering a clinician's question fro
 - Keep answers under 150 words unless asked for more.
 - Copy numbers exactly as the tools return them; never compute new ones (no "in N days"). Write dates as
   YYYY-MM-DD.
-- Plain sentences, each ending with its citation."""
+- Plain sentences, each ending with its citation. Only state what the records show or what is missing; no
+  offers, advice, or remarks about yourself. Never write a citation for a record you don't have."""
 
 # (name, description, properties, required, method, path template, query/body keys, default object type)
 TOOL_SPECS = [
@@ -116,8 +125,10 @@ def run_tool(name: str, args: dict, token: str | None, seen: dict) -> tuple[str,
 
 
 def check(answer: str, seen: dict, sources: str) -> list[str]:
-    return (citations_resolve(answer, set(seen)) + every_claim_cited(answer) + numbers_grounded(answer, sources)
-            + no_dosing(answer) + length_limit(answer))
+    names = {w.lower() for _, label in seen.values() if label for w in re.findall(r"[A-Za-z]{4,}", label)}
+    names -= {"inventory", "finding", "note", "patient"}  # generic type words from labels are not record content
+    return (citations_well_formed(answer) + citations_resolve(answer, set(seen)) + every_claim_cited(answer, names)
+            + numbers_grounded(answer, sources) + no_dosing(answer) + length_limit(answer))
 
 
 def retype(answer: str, seen: dict) -> str:

@@ -30,6 +30,8 @@ NOTHING_TO_CITE = re.compile(
     re.IGNORECASE,
 )
 MAX_ASK_WORDS = 150
+STATUS_WORDS = {"backordered", "backorder", "restock", "stock", "allergy", "allergic", "pending", "confirmed",
+                "overridden", "rejected", "abnormal", "critical", "elevated", "diagnosis", "diagnosed"}
 
 
 def plain(text: str) -> str:
@@ -73,11 +75,25 @@ def citations_resolve(text: str, allowed_ids: set[str]) -> list[str]:
     return [f"Citation id {oid} is not in the records you were given. Cite only those ids." for oid in bad]
 
 
-def every_claim_cited(text: str) -> list[str]:
-    """Ask: each sentence carries a citation unless it reports missing or denied data."""
-    bad = [s for s in sentences(text)
-           if len(s.split()) >= 3 and not CITE.search(s) and not NOTHING_TO_CITE.search(s)]
+def is_claim(sentence: str, names: set[str]) -> bool:
+    """A sentence states a record fact when it carries record content: a number, a subtype, a status word, or a
+    name from the records (patient, medication, ...). "You may want to check with pathology" is not a claim."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", sentence)}
+    return bool(NUMBER.search(sentence) or words & names or words & STATUS_WORDS
+                or any(re.search(rf"\b{re.escape(t)}\b", sentence, re.IGNORECASE)
+                       for terms in SUBTYPE_TERMS.values() for t in terms))
+
+
+def every_claim_cited(text: str, names: set[str] = frozenset()) -> list[str]:
+    """No record fact without a citation (spec 10.4). Sentences about missing or denied data need none."""
+    bad = [s for s in sentences(text) if not CITE.search(s) and not NOTHING_TO_CITE.search(s) and is_claim(s, names)]
     return [f"Cite this sentence with [[obj:type:id]] or remove it: \"{s[:80]}\"" for s in bad]
+
+
+def citations_well_formed(text: str) -> list[str]:
+    """Every [[obj:...]] token is [[obj:Type:<uuid>]]; a made-up id like 'none' is not a citation."""
+    bad = [t for t in re.findall(r"\[\[obj:[^\]]*\]\]", text) if not CITE.fullmatch(t)]
+    return [f"{t} is not a valid citation. Cite a record id from the tool results, or cite nothing." for t in bad]
 
 
 def no_dosing(text: str) -> list[str]:
