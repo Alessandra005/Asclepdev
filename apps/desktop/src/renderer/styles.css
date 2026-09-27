@@ -476,6 +476,9 @@ body {
 .mt {
   margin-top: 12px;
 }
+.ml {
+  margin-left: 6px;
+}
 .muted {
   color: var(--muted);
 }

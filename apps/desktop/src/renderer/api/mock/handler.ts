@@ -196,6 +196,7 @@ function flagActions(s: LiveScribeSession): ScribeAction[] {
       why_relevant: why,
       confidence: hits.length > 1 || best >= 0.85 ? 'high' : best >= 0.6 ? 'medium' : 'low',
       source: 'visual',
+      verification: 'not_checked',
       included: false
     })
   }
@@ -213,6 +214,7 @@ function flagActions(s: LiveScribeSession): ScribeAction[] {
       why_relevant: 'Patient-reported in the conversation.',
       confidence: 'medium',
       source: 'conversation',
+      verification: 'not_checked',
       included: false
     })
   }

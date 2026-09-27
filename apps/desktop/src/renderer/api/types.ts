@@ -310,6 +310,8 @@ export interface ScribeAction {
   why_relevant: string
   confidence: 'low' | 'medium' | 'high'
   source: 'visual' | 'sound' | 'conversation'
+  /** confirmed / unverified: checked by the confirming agent (Mellea); not_checked: rule-based review. */
+  verification: 'confirmed' | 'unverified' | 'not_checked'
   /** The attending's check: include this possible symptom in the scribing report. */
   included: boolean
 }

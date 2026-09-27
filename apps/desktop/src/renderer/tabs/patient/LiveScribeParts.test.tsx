@@ -10,6 +10,7 @@ const action = (over: Partial<ScribeAction>): ScribeAction => ({
   why_relevant: 'Coughing seen during the visit.',
   confidence: 'high',
   source: 'visual',
+  verification: 'not_checked',
   included: false,
   ...over
 })
@@ -60,5 +61,21 @@ describe('ActionChecklist', () => {
       <ActionChecklist actions={[action({})]} selected={new Set()} onToggle={() => {}} canChoose={false} />
     )
     expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('shows which possible symptoms the confirming agent checked', () => {
+    render(
+      <ActionChecklist
+        actions={[
+          action({ verification: 'confirmed' }),
+          action({ id: 'a2', action: 'Rubbed chest', verification: 'unverified' })
+        ]}
+        selected={new Set()}
+        onToggle={() => {}}
+        canChoose
+      />
+    )
+    expect(screen.getByText('confirmed by agent')).toBeTruthy()
+    expect(screen.getByText('unverified')).toBeTruthy()
   })
 })
