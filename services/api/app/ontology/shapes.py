@@ -110,6 +110,10 @@ def title(object_type: str, row: dict) -> str:
         return f"Inventory: {row.get('name', 'medication')}"
     if object_type == "MedicationRequest":
         return row.get("name") or row.get("dosage_text") or "Medication request"
+    if object_type == "Specimen":
+        at = row.get("collected_at")
+        return " · ".join(x for x in (row.get("site"), row.get("accession"),
+                                      at and f"collected {at:%b %d, %Y}") if x) or "Specimen"
     return row.get("display") or row.get("substance") or object_type
 
 
@@ -117,9 +121,13 @@ def body(object_type: str, row: dict) -> str:
     """Plain-language detail for the SourceDrawer. Facts only, straight from the row."""
     src = SOURCE_LABELS.get(row.get("source_system") or "", row.get("source_system") or "Asclep")
     if object_type == "Observation":
-        rng = f" Reference {row['ref_low']}-{row['ref_high']}." if row.get("ref_low") is not None else ""
-        flag = f" Flag {row['interpretation']}." if row.get("interpretation") else ""
-        return f"{title(object_type, row)}.{rng}{flag} Recorded by {src}."
+        lo, hi = row.get("ref_low"), row.get("ref_high")
+        ref = f"ref {lo:g}–{hi:g}" if lo is not None and hi is not None else \
+            f"ref ≥ {lo:g}" if lo is not None else f"ref ≤ {hi:g}" if hi is not None else None
+        parts = [ref, row.get("interpretation") and f"flag {row['interpretation']}",  # a null flag is never "normal"
+                 row.get("loinc_code") and f"LOINC {row['loinc_code']}"]
+        detail = ", ".join(x for x in parts if x)
+        return f"{title(object_type, row)}{f' ({detail})' if detail else ''}. Recorded by {src}."
     if object_type == "Note":
         return row["body"]
     if object_type == "Allergy":

@@ -44,3 +44,17 @@ def test_unverified_answer_is_audited_as_validation_failure(client, fake_session
     client.post("/api/v1/ask", json={"question": "q"}, headers=token("nurse"))
     audits = [params for sql, params in fake_session.statements if "INSERT INTO audit_log" in sql]
     assert audits[-1]["r"] == "resident_validation_failed" and audits[-1]["k"] == "resident"
+
+
+def test_source_bodies_state_only_what_the_row_says() -> None:
+    from datetime import datetime
+
+    from app.ontology import shapes
+    obs = {"display": "Glucose", "value_num": 110.0, "unit": "mg/dL", "ref_low": 70.0, "ref_high": 99.0,
+           "interpretation": "H", "loinc_code": "2345-7", "source_system": "ehr-a"}
+    assert shapes.body("Observation", obs) == "Glucose: 110.0 mg/dL (ref 70–99, flag H, LOINC 2345-7). Recorded by Riverside."
+    bare = {**obs, "ref_low": None, "ref_high": None, "interpretation": None, "loinc_code": None}
+    assert shapes.body("Observation", bare) == "Glucose: 110.0 mg/dL. Recorded by Riverside."  # no invented "normal"
+    spec = {"site": "Lung biopsy", "accession": "NSO-GH-2026-001", "collected_at": datetime(2026, 9, 24)}
+    assert shapes.title("Specimen", spec) == "Lung biopsy · NSO-GH-2026-001 · collected Sep 24, 2026"
+    assert shapes.title("Specimen", {"accession": "NSO-GH-2026-001"}) == "NSO-GH-2026-001"

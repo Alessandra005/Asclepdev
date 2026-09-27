@@ -26,7 +26,8 @@ DATA_DIR = Path("/srv/data")  # the compose volume ../data (heatmaps, thumbs, ti
 # Which permission reading each cited type needs (spec 13 step 1).
 READ_PERMISSION = {"Observation": "view_labs", "Note": "view_notes", "Finding": "view_labs",
                    "Condition": "view_labs", "Allergy": "view_demographics", "MedicationRequest": "view_labs",
-                   "Encounter": "view_labs", "InventoryItem": "view_inventory", "Patient": "view_demographics"}
+                   "Encounter": "view_labs", "InventoryItem": "view_inventory", "Patient": "view_demographics",
+                   "Specimen": "view_demographics"}  # its specimen_only scope lets lab staff open specimens
 
 
 def _rid(request: Request) -> str | None:
