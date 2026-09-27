@@ -1,0 +1,3 @@
+specimen_accession,file_name,expected_label
+NSO-GH-2026-001,gregory-hale-biopsy.svs,LUAD
+NSO-PS-2026-001,priya-shah-biopsy.svs,LUSC

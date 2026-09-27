@@ -1,21 +1,27 @@
 """Database and ingestion seed script (spec section 16). Owner: Alessandra."""
+import csv
 import json
 import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from datetime import time as clock
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.audit.log import write_audit
 from app.auth.principal import Principal
+from app.config import settings
+from app.dev_seed import GREGORY, LINDA, PRIYA, REYES
 from app.ehr.hapi import HapiAdapter
 from app.ingest.pipeline import IngestBundleRequest
-from app.ontology.api import apply_action
+from app.ontology.api import apply_action, create_task_for_attending
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ingest.seed")
@@ -30,6 +36,13 @@ DEFAULT_PROVIDERS = [
 ]
 
 GOLDEN_DIR = Path("/srv/data/seed/golden")
+SLIDES_CSV = Path("/srv/data/seed/slides.csv")
+# Spec 17 step 4: Gregory's slide is analyzed on stage, so it gets an "analyze" task and no pre-computed finding.
+ANALYZE_LIVE = {"NSO-GH-2026-001"}
+# Spec 16: Dr. Reyes has 9 appointments today, Gregory at 10:30 and Linda at 11:15.
+GOLDEN_VISITS = {GREGORY: (clock(10, 30), "Biopsy results"), LINDA: (clock(11, 15), "Potassium follow-up"),
+                 PRIYA: (clock(9, 30), "Treatment planning")}
+OTHER_SLOTS = [clock(8, 0), clock(8, 30), clock(9, 0), clock(13, 0), clock(13, 30), clock(14, 0), clock(14, 30)]
 
 # Spec 16 seed step 3: Gregory's Riverside (ehr-a) history stays in ehr-a until the demo's transcript
 # request pulls it, so the chart visibly fills in on stage. Loaded into HAPI, not ingested.
@@ -155,6 +168,60 @@ def load_golden_bundles() -> list[tuple[UUID, str]]:
     return list(targets.keys())
 
 
+def seed_slides(s: Session) -> None:
+    """Spec 16 step 4: slides from slides.csv, seeded (not uploaded) so the file name matches what the Lab
+    Technician keys on. Every slide but Gregory's gets its pre-computed Finding now (spec 17 backup plan)."""
+    from app.routes.lab import _post, store_finding
+    from asclep_contracts import ClassifyResult
+
+    for row in csv.DictReader(SLIDES_CSV.open(encoding="utf-8")):
+        accession, path = row["specimen_accession"], f"slides/{row['file_name']}"
+        specimen = s.execute(text("SELECT id, patient_id FROM specimen WHERE accession = :a"),
+                             {"a": accession}).mappings().first()
+        if specimen is None:
+            logger.warning(f"slides.csv: no specimen {accession} (was its bundle ingested?)")
+            continue
+        slide_id = s.execute(text("SELECT id FROM slide WHERE file_path = :f"), {"f": path}).scalar() or \
+            s.execute(text("INSERT INTO slide (specimen_id, file_path) VALUES (:sp, :f) RETURNING id"),
+                      {"sp": specimen["id"], "f": path}).scalar()
+        if accession in ANALYZE_LIVE:
+            create_task_for_attending(s, specimen["patient_id"], "analyze_slide", "Biopsy slide ready to analyze",
+                                      slide_id)
+        elif not s.execute(text("SELECT 1 FROM finding WHERE slide_id = :id"), {"id": slide_id}).first():
+            try:
+                result = _post(f"{settings.labtech_url}/classify", {"slide_id": str(slide_id), "file_path": path},
+                               ClassifyResult, "Lab Technician")
+            except Exception as e:  # lab-tech down: the slide stays analyzable from the Lab tab
+                logger.error(f"Pre-computing the finding for {accession} failed: {e}")
+            else:
+                finding = store_finding(s, slide_id, specimen["patient_id"], result)
+                write_audit(s, None, "create", "Finding", finding["id"], specimen["patient_id"], ai="lab_tech",
+                            ran_on="local")
+                logger.info(f"{accession}: {result.label} ({result.confidence:.2f}), expected {row['expected_label']}")
+        s.commit()
+
+
+def seed_appointments(s: Session) -> None:
+    """Today's schedule for Dr. Reyes: the golden patients at their scripted times, then her other care-team
+    patients (Synthea) in the remaining slots, up to 9 visits. Re-running adds nothing."""
+    tz = ZoneInfo(settings.demo_tz)
+    today = datetime.now(tz).date()
+    others = s.execute(text("""SELECT patient_id FROM care_team_member WHERE user_id = :u
+                               AND NOT (patient_id = ANY(:golden)) ORDER BY patient_id LIMIT :n"""),
+                       {"u": REYES, "golden": list(GOLDEN_VISITS), "n": len(OTHER_SLOTS)}).scalars()
+    visits = [(pid, at, reason) for pid, (at, reason) in GOLDEN_VISITS.items()] + \
+        [(pid, at, "Follow-up") for pid, at in zip(others, OTHER_SLOTS)]
+    for pid, at, reason in visits:
+        start = datetime.combine(today, at, tz)
+        s.execute(text("""INSERT INTO appointment (patient_id, user_id, start_at, end_at, reason)
+                          SELECT :p, :u, :s, :e, :r WHERE EXISTS (SELECT 1 FROM patient WHERE id = :p)
+                          AND NOT EXISTS (SELECT 1 FROM appointment WHERE patient_id = :p AND user_id = :u
+                                          AND start_at = :s)"""),
+                  {"p": pid, "u": REYES, "s": start, "e": start + timedelta(minutes=30), "r": reason})
+    s.commit()
+    logger.info(f"Appointments for {today}: {len(visits)} scheduled for Dr. Reyes.")
+
+
 def seed_ingestion() -> None:
     from app.db import SessionLocal
 
@@ -182,6 +249,9 @@ def seed_ingestion() -> None:
             except Exception as e:
                 session.rollback()
                 logger.error(f"Failed ingesting {fhir_patient_id}: {e}")
+
+        seed_slides(session)
+        seed_appointments(session)
 
         from app.alerts.engine import sweep_all
         raised = sweep_all(session)
