@@ -42,8 +42,6 @@ def create_transcript_request(
                             RequestTranscriptPayload(patient_id=patient_id, from_provider_id=provider_id))
     except LookupError as exc:
         raise AsclepError("VALIDATION_ERROR", str(exc))
-    except PermissionError as exc:
-        raise AsclepError("FORBIDDEN", str(exc))
 
 
 @router.get("/patients/{patient_id}/transcripts")
@@ -52,10 +50,7 @@ def list_patient_transcripts(
     p: Principal = Depends(require("request_transcripts", patient_param="patient_id", object_type="TranscriptRequest")),
     s=Depends(get_session),
 ):
-    try:
-        return {"items": list_transcripts_for_patient(s, p, patient_id), "next_cursor": None}
-    except PermissionError as exc:
-        raise AsclepError("FORBIDDEN", str(exc))
+    return {"items": list_transcripts_for_patient(s, p, patient_id), "next_cursor": None}
 
 
 @router.get("/admin/consent-tasks")

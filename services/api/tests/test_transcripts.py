@@ -35,3 +35,21 @@ def test_consent_errors_map_to_spec_codes(client, fake_session, monkeypatch, exc
     r = client.post(f"/api/v1/transcripts/{uuid4()}/consent", json={"consent_ref": "Signed form #2231", "granted": True},
                     headers=token("admin"))
     assert r.status_code == status, r.text
+
+
+def test_break_the_glass_grant_can_read_transcripts(client, fake_session):
+    """Access is decided once, by require(): an emergency grant (no care-team row) reads the transcript list."""
+    from app.db import get_session
+    from app.main import app
+    from tests.conftest import FakeSession
+
+    class Emergency(FakeSession):
+        def execute(self, stmt, params=None):
+            result = super().execute(stmt, params)
+            if "FROM emergency_access" in str(stmt):
+                result.first = lambda: (1,)  # an active grant
+            return result
+
+    app.dependency_overrides[get_session] = lambda: Emergency()
+    r = client.get(f"/api/v1/patients/{uuid4()}/transcripts", headers=token("physician"))
+    assert r.status_code == 200 and r.json() == {"items": [], "next_cursor": None}

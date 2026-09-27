@@ -451,6 +451,11 @@ def finding_confirmed(s: Session, p: Principal, finding: dict) -> UUID:
     return condition_id
 
 
+def provider_names(s: Session) -> set[str]:
+    """EHR source systems (spec 16 providers). Feeds such as 'asclep' or 'note-drop' are never a provider."""
+    return set(s.execute(text("SELECT name FROM provider")).scalars())
+
+
 def find_by_mrn(s: Session, p: Principal, mrn: str) -> dict | None:
     """Exact-MRN lookup (name and MRN only); audited, because it can reach patients off the user's team."""
     row = s.execute(text("SELECT * FROM patient WHERE lower(mrn) = lower(:m) AND record_status = 'current'"),

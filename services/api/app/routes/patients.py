@@ -86,8 +86,9 @@ def get_patient(patient_id: UUID,
     seen = dict.fromkeys([row["source_system"]])  # ordered set: home source first
     for type_ in ("Allergy", "Condition", "Observation", "MedicationRequest"):
         seen.update(dict.fromkeys(r["source_system"] for r in _all(s, p, type_, patient_id)))
+    providers = ontology.provider_names(s)  # spec 11: one chip per provider, never 'asclep' or a feed
     sources = [{"source_system": src, "label": SOURCE_LABELS.get(src, src),
-                "status": "current" if i == 0 else "merged"} for i, src in enumerate(seen)]
+                "status": "current" if i == 0 else "merged"} for i, src in enumerate(x for x in seen if x in providers)]
     return {**_list_item(row), "allergies": allergies,
             # No allergy rows is not "none known": say unknown, never imply the patient has none.
             "allergy_status": "recorded" if allergies else "unknown", "sources": sources}

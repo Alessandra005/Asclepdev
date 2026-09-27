@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.ontology.api import provider_names
+
 
 def _link(s: Session, link_type: str, from_type: str, from_id: UUID, to_type: str, to_id: UUID, rule: str) -> bool:
     """Insert (or re-activate) one link; True when it is new or was retracted before."""
@@ -47,7 +49,7 @@ def cross_source_conflict(s: Session, patient_id: UUID) -> list[dict]:
         UNION SELECT source_system FROM medication_request WHERE patient_id = :p
         UNION SELECT source_system FROM note WHERE patient_id = :p"""), {"p": patient_id}).scalars())
     # Only EHR providers hold a record set that can lack something; feeds (note-drop, asclep) never do.
-    sources &= set(s.execute(text("SELECT name FROM provider")).scalars())
+    sources &= provider_names(s)
     if len(sources) < 2:
         return []
     items = [("Allergy", r) for r in s.execute(text("""

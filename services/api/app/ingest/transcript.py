@@ -72,14 +72,8 @@ class MergeTranscriptPayload(BaseModel):
 
 
 def request_transcript(s: Session, p: Principal, payload: RequestTranscriptPayload) -> dict:
-    """Step 1-2 of spec §11's flow. status='requested'."""
-    rel = s.execute(
-        text("SELECT relationship FROM care_team_member WHERE user_id = :u AND patient_id = :p"),
-        {"u": p.user_id, "p": payload.patient_id},
-    ).scalar()
-    if rel is None:
-        raise PermissionError("You are not on this patient's care team.")
-
+    """Step 1-2 of spec §11's flow. status='requested'. The route's require() already checked the care team
+    (or a break-the-glass grant); access is never re-decided here."""
     request_id = s.execute(
         text("""INSERT INTO transcript_request (patient_id, requested_by, from_provider_id, status)
                 VALUES (:pid, :uid, :provider, 'requested') RETURNING id"""),
@@ -164,12 +158,6 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
 
 
 def list_transcripts_for_patient(s: Session, p: Principal, patient_id: UUID) -> list[dict]:
-    rel = s.execute(
-        text("SELECT relationship FROM care_team_member WHERE user_id = :u AND patient_id = :p"),
-        {"u": p.user_id, "p": patient_id},
-    ).scalar()
-    if rel is None:
-        raise PermissionError("You are not on this patient's care team.")
     rows = s.execute(text(_VIEW_SQL + " WHERE t.patient_id = :pid ORDER BY t.created_at DESC"),
                      {"pid": patient_id}).mappings().all()
     return [_view(r) for r in rows]
