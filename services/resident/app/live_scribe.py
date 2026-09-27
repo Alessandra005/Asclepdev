@@ -257,7 +257,44 @@ async def review_llm(req: LiveScribeReviewRequest) -> LiveScribeReviewResult:
             confidence=a.confidence.lower() if a.confidence.lower() in ("low", "medium", "high") else "low",
             source=source,
         ))
-    return LiveScribeReviewResult(actions=actions, summary=observable_only(str(data.get("summary", ""))))
+    summary = observable_only(str(data.get("summary", "")))
+    if not actions:
+        return LiveScribeReviewResult(actions=[], summary=summary)
+    kept = await run_in_threadpool(confirm_actions, actions, req)
+    note = f"The confirming agent checked {len(actions)} flagged items and kept {len(kept)}."
+    return LiveScribeReviewResult(actions=kept, summary=f"{summary} {note}".strip())
+
+
+def evidence_lines(req: LiveScribeReviewRequest) -> dict[str, list[str]]:
+    """Session time -> what was logged at that moment, the only evidence the confirming agent sees."""
+    lines: dict[str, list[str]] = {}
+    for o in req.observations:
+        lines.setdefault(o.t, []).append(f"[{o.t}] seen ({o.category}): {o.text}")
+    for s in req.transcript:
+        lines.setdefault(s.t, []).append(f"[{s.t}] said: {s.text}")
+    return lines
+
+
+def confirm_actions(actions: list[ScribeAction], req: LiveScribeReviewRequest) -> list[ScribeAction]:
+    """Agent 2 (Mellea): confirm each candidate against its own evidence. Rejected ones are dropped."""
+    from app import symptom_agent  # Mellea is only imported in real mode
+
+    m = symptom_agent.open_session(VLM_URL, VLM_MODEL)
+    lines = evidence_lines(req)
+    kept: list[ScribeAction] = []
+    try:
+        for a in actions:
+            evidence = [line for t in a.times for line in lines.get(t, [])]
+            source = "said aloud" if a.source == "conversation" else "seen on camera"
+            verdict, reason = symptom_agent.confirm(m, a.action, source, evidence, INFERENCE)
+            if verdict == "rejected":
+                continue
+            kept.append(a.model_copy(update={
+                "id": f"a{len(kept) + 1}", "verification": verdict, "why_relevant": reason or a.why_relevant,
+            }))
+    finally:
+        m.backend.close()
+    return kept
 
 
 VISUAL_WHY = {

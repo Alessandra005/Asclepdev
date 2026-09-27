@@ -40,6 +40,18 @@ services:
       interval: 5s
       retries: 10
 
+  # Browse the LiveScribing database at http://localhost:8082 (opt-in: --profile tools). Localhost only:
+  # it shows visit transcripts, so it must never be exposed on the network.
+  mongo-express:
+    profiles: ["tools"]
+    image: mongo-express:1
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    ports: ["127.0.0.1:8082:8081"]
+    depends_on:
+      mongo: {condition: service_healthy}
+
   lab-tech:
     build: {context: .., dockerfile: services/lab-tech/Dockerfile}
     env_file: .env

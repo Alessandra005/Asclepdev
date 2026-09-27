@@ -11,6 +11,8 @@ from .scribe import ScribeObservation
 
 Confidence = Literal["low", "medium", "high"]
 ActionSource = Literal["visual", "sound", "conversation"]
+# confirmed / unverified: checked by the confirming agent (Mellea); not_checked: rule-based (mock) review.
+Verification = Literal["confirmed", "unverified", "not_checked"]
 
 
 class TranscriptSegment(BaseModel):
@@ -27,6 +29,7 @@ class ScribeAction(BaseModel):
     why_relevant: str
     confidence: Confidence
     source: ActionSource
+    verification: Verification = "not_checked"
 
 
 class LiveScribeWindowResult(BaseModel):

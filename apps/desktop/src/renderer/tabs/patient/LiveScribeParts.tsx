@@ -86,6 +86,16 @@ export function ActionChecklist({
             </td>
             <td>
               {a.action}
+              {a.verification === 'confirmed' && (
+                <Tag minimal intent="success" icon="tick" className="ml">
+                  confirmed by agent
+                </Tag>
+              )}
+              {a.verification === 'unverified' && (
+                <Tag minimal intent="warning" className="ml">
+                  unverified
+                </Tag>
+              )}
               <div className="small muted">{a.why_relevant}</div>
             </td>
             <td className="mono small">{a.times.join(', ')}</td>

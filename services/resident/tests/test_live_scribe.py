@@ -40,6 +40,7 @@ def test_llm_review_drops_items_without_logged_evidence(monkeypatch):
         ]}
 
     monkeypatch.setattr(live_scribe, "_chat", fake_chat)
+    monkeypatch.setattr(live_scribe, "confirm_actions", lambda actions, req: actions)  # agent 2 tested below
     req = LiveScribeReviewRequest(session_id="s", transcript=[], observations=[
         ScribeObservation(t="00:00:05", category="cough", text="Coughed twice", confidence=0.9)])
     result = asyncio.run(live_scribe.review_llm(req))
@@ -58,13 +59,14 @@ def test_llm_review_strips_guessed_causes(monkeypatch):
                 ]}
 
     monkeypatch.setattr(live_scribe, "_chat", fake_chat)
+    monkeypatch.setattr(live_scribe, "confirm_actions", lambda actions, req: actions)
     req = LiveScribeReviewRequest(
         session_id="s",
         observations=[ScribeObservation(t="00:00:43", category="posture", text="Leaned forward", confidence=0.7)],
         transcript=[TranscriptSegment(t="00:01:04", end="00:01:10", text="I have had a dry cough for three weeks.")],
     )
     result = asyncio.run(live_scribe.review_llm(req))
-    assert result.summary == "Reported a three-week dry cough."
+    assert result.summary.startswith("Reported a three-week dry cough. The confirming agent checked 2")
     # The whole sentence guesses, so each falls back to neutral, observable wording.
     assert [a.why_relevant for a in result.actions] == ["Reported by the patient during the visit.",
                                                         "Seen during the visit."]
@@ -88,3 +90,85 @@ def test_vlm_frames_are_stamped_with_capture_times(monkeypatch):
     assert sent["labels"][:3] == ["frame 0 (BEFORE):", "frame 1 (PEAK MOVEMENT):", "frame 2 (AFTER):"]
     assert [(o.t, o.category, o.confidence) for o in obs] == [("00:00:34", "cough", 1.0), ("00:00:38", "other", 0.7)]
     # the guessing observation was dropped entirely
+
+
+# ---------------------------------------------------------------- agent 2: the Mellea confirming agent
+
+class _Backend:
+    closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _Session:
+    def __init__(self):
+        self.backend = _Backend()
+
+
+def _candidates():
+    from asclep_contracts import ScribeAction
+    base = {"why_relevant": "flagger text", "confidence": "medium"}
+    return [
+        ScribeAction(id="a1", action="Mentioned fever", times=["00:00:36"], source="conversation", **base),
+        ScribeAction(id="a2", action="Mentioned shortness of breath", times=["00:00:06"], source="conversation", **base),
+        ScribeAction(id="a3", action="Rubbed chest", times=["00:00:20"], source="visual", **base),
+    ]
+
+
+def test_confirming_agent_drops_rejected_and_marks_the_rest(monkeypatch):
+    from app import symptom_agent
+    session, seen = _Session(), []
+
+    def fake_confirm(m, candidate, source, evidence, inference):
+        seen.append((candidate, source, evidence))
+        return {"Mentioned fever": ("rejected", None),
+                "Mentioned shortness of breath": ("confirmed", "Patient said stairs make them short of breath."),
+                "Rubbed chest": ("unverified", None)}[candidate]
+
+    monkeypatch.setattr(symptom_agent, "open_session", lambda url, model: session)
+    monkeypatch.setattr(symptom_agent, "confirm", fake_confirm)
+    req = LiveScribeReviewRequest(session_id="s", observations=[
+        ScribeObservation(t="00:00:20", category="movement", text="Rubbed chest with right hand", confidence=0.8)],
+        transcript=[TranscriptSegment(t="00:00:06", end="00:00:09", text="I get short of breath on the stairs."),
+                    TranscriptSegment(t="00:00:36", end="00:00:40", text="No fevers.")])
+    kept = live_scribe.confirm_actions(_candidates(), req)
+    assert [(a.id, a.action, a.verification) for a in kept] == [
+        ("a1", "Mentioned shortness of breath", "confirmed"), ("a2", "Rubbed chest", "unverified")]
+    assert kept[0].why_relevant == "Patient said stairs make them short of breath."  # the agent's grounded reason
+    assert kept[1].why_relevant == "flagger text"
+    # each candidate is judged on its own evidence only
+    assert seen[0] == ("Mentioned fever", "said aloud", ["[00:00:36] said: No fevers."])
+    assert seen[2][2] == ["[00:00:20] seen (movement): Rubbed chest with right hand"]
+    assert session.backend.closed
+
+
+def test_confirm_rechecks_requirements_after_sampling(monkeypatch):
+    from app import symptom_agent
+
+    def verdict(possible, reason):
+        return lambda m, **kw: symptom_agent.SymptomVerdict(possible_symptom=possible, reason=reason)
+
+    cases = [
+        (verdict(True, "Said they get short of breath on stairs."), ("confirmed", "Said they get short of breath on stairs.")),
+        (verdict(False, "Patient denied fever."), ("rejected", None)),
+        (verdict(True, "Chest rubbing may indicate cardiac pain."), ("unverified", None)),  # guesses a cause
+        (verdict(True, " ".join(["word"] * 30)), ("unverified", None)),  # over the word limit
+    ]
+    for fake, expected in cases:
+        monkeypatch.setattr(symptom_agent, "confirm_possible_symptom", fake)
+        assert symptom_agent.confirm(None, "c", "said aloud", [], live_scribe.INFERENCE) == expected
+
+    def down(m, **kw):
+        raise ConnectionError("VLM server unreachable")
+
+    monkeypatch.setattr(symptom_agent, "confirm_possible_symptom", down)
+    assert symptom_agent.confirm(None, "c", "said aloud", [], live_scribe.INFERENCE) == ("unverified", None)
+
+
+def test_requirement_checks_read_mellea_wrapped_output():
+    from app import symptom_agent
+    wrapped = '{"result": {"possible_symptom": true, "reason": "Said they get short of breath on stairs."}}'
+    assert symptom_agent.reason_of(wrapped) == "Said they get short of breath on stairs."
+    assert symptom_agent.reason_of('{"possible_symptom": false, "reason": "Denied fever."}') == "Denied fever."
+    assert symptom_agent.reason_of("not json") is None
