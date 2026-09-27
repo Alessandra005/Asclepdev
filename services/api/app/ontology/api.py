@@ -451,6 +451,12 @@ def finding_confirmed(s: Session, p: Principal, finding: dict) -> UUID:
     return condition_id
 
 
+def conflicted_ids(s: Session, ids: list[UUID]) -> set[str]:
+    """Which of these objects carry an active conflicts_with link (7A.2), for flagging them in AI context."""
+    return {str(x) for x in s.execute(text("""SELECT from_id FROM ontology_link WHERE link_type = 'conflicts_with'
+        AND status = 'active' AND from_id = ANY(CAST(:ids AS uuid[]))"""), {"ids": [str(i) for i in ids]}).scalars()}
+
+
 def provider_names(s: Session) -> set[str]:
     """EHR source systems (spec 16 providers). Feeds such as 'asclep' or 'note-drop' are never a provider."""
     return set(s.execute(text("SELECT name FROM provider")).scalars())

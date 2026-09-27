@@ -162,8 +162,9 @@ def draft_report(finding_id: UUID, request: Request, p: Principal = Depends(requ
     patient_id = finding["patient_id"]
     check_patient(s, p, "view_labs", patient_id, "Report", "create", _rid(request), finding_id)
     view = ontology.context_view(s, p, "pathology_review", finding_id)
-    context = [ContextRef(object_type=i.type, id=i.id, text=i.title) for i in view.items
-               if i.type not in ("Patient", "Finding")]
+    items = [i for i in view.items if i.type not in ("Patient", "Finding")]
+    conflicted = ontology.conflicted_ids(s, [i.id for i in items])
+    context = [ContextRef(object_type=i.type, id=i.id, text=context_text(s, i.type, i.id, conflicted)) for i in items]
     req = DraftReportRequest(
         finding=LockedFinding(finding_id=finding_id, label=finding["label"], confidence=finding["confidence"],
                               class_scores=finding["class_scores"], model_name=finding["model_name"],
@@ -182,12 +183,31 @@ def draft_report(finding_id: UUID, request: Request, p: Principal = Depends(requ
     return report_view(s, report, patient_id)
 
 
+def context_text(s, type_: str, object_id: UUID, conflicted: set[str]) -> str:
+    """What the Resident reads for one cited item: the row's full facts (a note's body, a text-valued
+    observation such as smoking status), where it came from, and whether sources disagree about it."""
+    row = ontology.peek(s, type_, object_id)
+    out = shapes.body(type_, row)
+    if type_ == "Note":  # the other bodies already say "Recorded by ..."
+        src = row.get("source_system") or "asclep"
+        body = out if len(out) <= 600 else out[:597].rstrip() + "..."
+        out = f"{shapes.title(type_, row)}, recorded by {shapes.SOURCE_LABELS.get(src, src)}: {body}"
+    if str(object_id) in conflicted:
+        out += " Source conflict: another provider's records lack this."
+    return out
+
+
 def report_view(s, report: dict, patient_id: UUID) -> dict:
-    """body_md -> {sentences[{text, citation_ids}], citations[]}. Only citations of this patient's records survive."""
+    """body_md -> {sentences[{text, citation_ids, kind: heading|sentence}], citations[]}.
+    Only citations of this patient's records survive."""
     sentences, citations = [], {}
     for line in report["body_md"].splitlines():
         line = line.strip().lstrip("-*").strip()
-        if not line or line.startswith("#"):
+        if line.startswith("#"):  # spec 10.1's fixed headings reach the desktop as their own rows
+            if heading := line.lstrip("#").strip():
+                sentences.append({"text": heading, "citation_ids": [], "kind": "heading"})
+            continue
+        if not line:
             continue
         ids = []
         for type_, oid in CITE.findall(line):
@@ -203,7 +223,7 @@ def report_view(s, report: dict, patient_id: UUID) -> dict:
             ids.append(cid)
         text_ = CITE.sub("", line).replace("_", "").strip()
         if text_:
-            sentences.append({"text": text_, "citation_ids": ids})
+            sentences.append({"text": text_, "citation_ids": ids, "kind": "sentence"})
     return {"id": report["id"], "finding_id": report["finding_id"], "status": report.get("status", "draft"),
             "locked_check_passed": report["locked_check_passed"], "sentences": sentences,
             "citations": list(citations.values())}
