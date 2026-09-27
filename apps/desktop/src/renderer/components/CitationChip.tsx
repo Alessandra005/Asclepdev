@@ -4,11 +4,12 @@ import { useUi } from '@/state/ui'
 
 const ICON: Record<
   Citation['kind'],
-  'lab-test' | 'document' | 'pulse' | 'prescription' | 'search-around' | 'box' | 'eye-open'
+  'lab-test' | 'document' | 'pulse' | 'warning-sign' | 'prescription' | 'box' | 'eye-open'
 > = {
   observation: 'pulse',
   note: 'document',
   condition: 'pulse',
+  allergy: 'warning-sign',
   medication: 'prescription',
   finding: 'lab-test',
   inventory: 'box',

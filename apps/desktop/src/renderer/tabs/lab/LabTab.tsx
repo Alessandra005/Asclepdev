@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Button, Card, FileInput, NonIdealState, ProgressBar, Slider } from '@blueprintjs/core'
-import { useClassify, useDraftReport, useFindings, useReviewFinding } from '@/api/hooks'
-import type { Finding, Patient, Report } from '@/api/types'
+import { useClassify, useDraftReport, useFindings, useReviewFinding, useSlides } from '@/api/hooks'
+import type { Finding, Patient, Slide } from '@/api/types'
 import { AiDraftBlock } from '@/components/AiDraftBlock'
+import { AuthedImage } from '@/components/AuthedImage'
 import { CitationChip } from '@/components/CitationChip'
 import { ErrorCallout, QueryState } from '@/components/QueryState'
 import { LocalProcessingPill } from '@/components/LocalProcessingPill'
@@ -15,10 +16,11 @@ export function LabTab() {
 }
 
 function LabBody({ patient }: { patient: Patient }) {
-  const q = useFindings(patient.id)
+  const slides = useSlides(patient.id)
+  const findings = useFindings(patient.id)
   return (
     <QueryState
-      query={q}
+      query={slides}
       isEmpty={(d) => d.items.length === 0}
       empty={{
         icon: 'lab-test',
@@ -26,25 +28,48 @@ function LabBody({ patient }: { patient: Patient }) {
         description: 'Upload a slide under a specimen to run the Lab Technician.'
       }}
     >
-      {(d) => <FindingWorkspace patient={patient} finding={d.items[0]!} />}
+      {(d) => {
+        const slide = d.items[0]! // newest first
+        const finding = findings.data?.items.find((f) => f.id === slide.finding_id) ?? null
+        return (
+          <>
+            {findings.isError && (
+              <ErrorCallout error={findings.error} onRetry={() => void findings.refetch()} />
+            )}
+            <SlideWorkspace key={slide.id} patient={patient} slide={slide} finding={finding} />
+          </>
+        )
+      }}
     </QueryState>
   )
 }
 
-function FindingWorkspace({ patient, finding }: { patient: Patient; finding: Finding }) {
+/**
+ * finding null = not analyzed yet: Analyze classifies the slide, then drafts the Resident report.
+ * The classify result shows at once; the refetched /findings row replaces it (review status etc.).
+ */
+function SlideWorkspace({
+  patient,
+  slide,
+  finding
+}: {
+  patient: Patient
+  slide: Slide
+  finding: Finding | null
+}) {
   const can = useSession((s) => s.can)
   const user = useSession((s) => s.user)
   const [opacity, setOpacity] = useState(0.5)
-  const [analyzed, setAnalyzed] = useState(false)
-  const [report, setReport] = useState<Report | null>(null)
   const classify = useClassify(patient.id)
   const draft = useDraftReport()
   const review = useReviewFinding(patient.id)
+  const current = finding ?? classify.data ?? null
+  const analyzed = current !== null
+  const report = draft.data ?? null
 
   const analyze = async () => {
-    await classify.mutateAsync(finding.slide_id)
-    setAnalyzed(true)
-    setReport(await draft.mutateAsync(finding.id))
+    const f = await classify.mutateAsync(slide.id)
+    draft.mutate(f.id)
   }
   const busy = classify.isPending || draft.isPending
 
@@ -52,16 +77,32 @@ function FindingWorkspace({ patient, finding }: { patient: Patient; finding: Fin
     <div className="page lab">
       <div className="lab-left">
         <div className="row between">
-          <h2 className="h2">{finding.specimen_label}</h2>
+          <h2 className="h2">{slide.specimen_label}</h2>
           <FileInput text="Upload slide" disabled />
         </div>
-        {/* TODO(Brandon + Ron): OpenSeadragon viewer once the DZI/IIIF contract is agreed (kickoff p.6). */}
+        {/* Heatmap PNG matches the thumbnail's size, so two stacked images line up (no deep-zoom needed). */}
         <div className="slide-viewer">
-          <div className="slide-tissue" />
-          {analyzed && <div className="slide-heatmap" style={{ opacity }} />}
-          <span className="slide-caption muted small">
-            Slide + heatmap viewer · placeholder, not model output
-          </span>
+          {current?.thumbnail_url ? (
+            <>
+              <AuthedImage url={current.thumbnail_url} alt="Slide thumbnail" className="slide-img" />
+              {current.heatmap_url && (
+                <AuthedImage
+                  url={current.heatmap_url}
+                  alt="Model heatmap"
+                  className="slide-img"
+                  style={{ opacity }}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <div className="slide-tissue" />
+              {analyzed && <div className="slide-heatmap" style={{ opacity }} />}
+              <span className="slide-caption muted small">
+                Slide + heatmap viewer · placeholder, not model output
+              </span>
+            </>
+          )}
         </div>
         <div className="row gap center">
           <span className="small muted">Heatmap opacity</span>
@@ -78,16 +119,20 @@ function FindingWorkspace({ patient, finding }: { patient: Patient; finding: Fin
         </div>
         <div className="label">Top evidence tiles</div>
         <div className="tiles">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="tile muted small">
-              Tile {i}
-            </div>
-          ))}
+          {current?.tile_urls.length
+            ? current.tile_urls.map((u, i) => (
+                <AuthedImage key={u} url={u} alt={`Evidence tile ${i + 1}`} className="tile" />
+              ))
+            : [1, 2, 3, 4].map((i) => (
+                <div key={i} className="tile muted small">
+                  Tile {i}
+                </div>
+              ))}
         </div>
       </div>
 
       <div className="lab-right">
-        {!analyzed ? (
+        {!current ? (
           <Card className="card">
             <NonIdealState
               icon="predictive-analysis"
@@ -114,22 +159,25 @@ function FindingWorkspace({ patient, finding }: { patient: Patient; finding: Fin
           <>
             <Card className="card">
               <ReviewPanel
-                finding={finding}
+                finding={current}
                 canReview={can('review_findings')}
                 submitting={review.isPending}
-                onSubmit={(req) => review.mutate({ findingId: finding.id, req })}
+                onSubmit={(req) => review.mutate({ findingId: current.id, req })}
               />
               {review.isError && <ErrorCallout error={review.error} />}
             </Card>
             {draft.isPending && <ProgressBar intent="primary" />}
-            {draft.isError && <ErrorCallout error={draft.error} onRetry={() => draft.mutate(finding.id)} />}
+            {draft.isError && <ErrorCallout error={draft.error} onRetry={() => draft.mutate(current.id)} />}
+            {!report && draft.isIdle && (
+              <Button icon="document" text="Draft Resident report" onClick={() => draft.mutate(current.id)} />
+            )}
             {report && (
               <AiDraftBlock
                 title="Resident report"
                 ranOn="anthropic_api"
                 reviewed={
-                  finding.status !== 'pending_review'
-                    ? `Reviewed by ${finding.reviewed_by ?? user?.full_name}`
+                  current.status !== 'pending_review'
+                    ? `Reviewed by ${current.reviewed_by ?? user?.full_name}`
                     : null
                 }
                 footer={

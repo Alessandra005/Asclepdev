@@ -5,6 +5,7 @@ import { AiDraftBlock } from '@/components/AiDraftBlock'
 import { CitationChip } from '@/components/CitationChip'
 import { ErrorCallout } from '@/components/QueryState'
 import { useUi } from '@/state/ui'
+import { answerParts } from './answerParts'
 
 const SUGGESTED = [
   "What is Gregory's treatment status and is pembrolizumab available?",
@@ -67,8 +68,22 @@ export function AskTab() {
             </div>
           }
         >
-          {/* SPEC-QUESTION: render answer_md with a markdown renderer? Not in the spec 6 library list. */}
-          <p dangerouslySetInnerHTML={{ __html: escapeBold(ask.data.answer_md) }} />
+          {ask.data.verified === false && (
+            <Callout intent="warning" icon="warning-sign">
+              The Resident couldn't produce a verified answer. Below are the matching records only.
+            </Callout>
+          )}
+          <p>
+            {answerParts(ask.data.answer_md, ask.data.citations).map((part, i) =>
+              part.kind === 'cite' ? (
+                <CitationChip key={i} citation={part.citation} />
+              ) : part.kind === 'bold' ? (
+                <strong key={i}>{part.text}</strong>
+              ) : (
+                part.text
+              )
+            )}
+          </p>
         </AiDraftBlock>
       )}
       {!ask.data && !ask.isPending && (
@@ -78,10 +93,4 @@ export function AskTab() {
       )}
     </div>
   )
-}
-
-/** Minimal, safe **bold** support: escape everything, then re-enable <strong>. */
-function escapeBold(md: string): string {
-  const esc = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 }

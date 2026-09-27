@@ -3,6 +3,7 @@ import { Spinner } from '@blueprintjs/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { configureClient } from '@/api/client'
 import { useMe } from '@/api/hooks'
+import { refreshIfExpiring } from '@/api/refresh'
 import { AppShell } from '@/components/AppShell'
 import { ErrorCallout } from '@/components/QueryState'
 import { useSession } from '@/state/session'
@@ -44,6 +45,19 @@ export function App() {
   useEffect(() => {
     configureClient({ getToken: () => useSession.getState().token, onUnauthorized: signOut })
   }, [signOut])
+
+  // Spec 13: real input keeps the session alive; polling does not, so an idle app still times out.
+  const signedIn = !!token
+  useEffect(() => {
+    if (!signedIn) return
+    const onActivity = () => void refreshIfExpiring()
+    window.addEventListener('pointerdown', onActivity)
+    window.addEventListener('keydown', onActivity)
+    return () => {
+      window.removeEventListener('pointerdown', onActivity)
+      window.removeEventListener('keydown', onActivity)
+    }
+  }, [signedIn])
 
   const me = useMe(!!token)
   useEffect(() => {

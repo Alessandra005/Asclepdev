@@ -402,6 +402,7 @@ export const GREGORY_FINDING: Finding = {
   review_note: null,
   reviewed_by: null,
   reviewed_at: null,
+  thumbnail_url: null,
   heatmap_url: null,
   tile_urls: [],
   provenance: prov('asclep', 'Finding/' + IDS.gregoryFinding, 2)

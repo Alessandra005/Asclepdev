@@ -225,7 +225,7 @@ export interface ConsentDecision {
 
 // ---- Citations (SPEC-QUESTION: public source-detail route not defined; see CLAUDE.md)
 export type CitationKind =
-  'observation' | 'note' | 'condition' | 'medication' | 'finding' | 'inventory' | 'scribe'
+  'observation' | 'note' | 'condition' | 'allergy' | 'medication' | 'finding' | 'inventory' | 'scribe'
 export interface Citation {
   id: string
   kind: CitationKind
@@ -242,6 +242,14 @@ export interface SourceRecord {
 
 // ---- Lab
 export type FindingStatus = 'pending_review' | 'confirmed' | 'overridden' | 'rejected'
+/** GET /patients/{id}/slides, newest first. finding_id null = not analyzed yet. */
+export interface Slide {
+  id: Uuid
+  specimen_id: Uuid
+  specimen_label: string
+  uploaded_at: IsoDateTime
+  finding_id: Uuid | null
+}
 export interface Finding {
   id: Uuid
   patient_id: Uuid
@@ -258,6 +266,8 @@ export interface Finding {
   review_note: string | null
   reviewed_by: string | null
   reviewed_at: IsoDateTime | null
+  /** Heatmap PNG is the same size as the thumbnail and is drawn over it. */
+  thumbnail_url: string | null
   heatmap_url: string | null
   tile_urls: string[]
   provenance: Provenance
@@ -392,6 +402,8 @@ export interface AskResponse {
   answer_md: string
   citations: Citation[]
   conversation_id: string
+  /** false = the Resident's validation loop failed; answer_md is the matching-records fallback. */
+  verified?: boolean
 }
 
 // ---- Audit

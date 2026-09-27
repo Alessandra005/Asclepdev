@@ -19,6 +19,7 @@ const finding = (over: Partial<Finding>): Finding => ({
   review_note: null,
   reviewed_by: null,
   reviewed_at: null,
+  thumbnail_url: null,
   heatmap_url: null,
   tile_urls: [],
   provenance: { source_system: 'asclep', source_ref: 'Finding/1', ingested_at: '2026-01-01T00:00:00Z' },

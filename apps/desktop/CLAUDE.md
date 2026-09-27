@@ -116,15 +116,19 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 
 | Question | Blocks | Ask |
 |---|---|---|
-| No public source-detail route for citations (`useSourceRecord` is mock-only) | SourceDrawer, Ask, Lab | Ron + Alessandra |
-| Slide viewer: DZI/IIIF source, tile/heatmap coordinates (OpenSeadragon not wired yet) | Lab viewer | Ron + Brandon |
 | `from_provider_id` for transcript requests: no provider list endpoint | Request records | Alessandra |
-| Where the AI step ran (`ran_on`) is not in the audit DDL | Assurant story | Ron |
-| How Dr. Wu opens Gregory to show "access denied" when `/patients` only lists his own patients (MRN lookup? break-the-glass?) | Demo step 9 | Ron |
-| Markdown renderer for `answer_md` is not in the library list | Ask | Ron |
-| Pending admin consent task data: no list route (mocks serve `/__mock/admin/consent-tasks`; live mode shows an honest error) | Admin tab | Ron + Alessandra |
-| `/records-tree` response shape; no encounter list route (Records tab composes existing routes for now) | Records tab | Ron + Alessandra |
-| Gateway has no CORS middleware; dev renderer runs on `http://localhost:5173` (packaged Electron sends `Origin: null`) | Every real API call | Ron |
+| `/records-tree` exists live (`{folders:[{name, items[]}]}`); Records tab still composes other routes | Records tab | (ours to switch) |
+
+Resolved (Sep 27): citations use `GET /sources/{Type:uuid}` in both modes; Dr. Wu reaches Gregory by
+exact MRN and gets the Emergency access screen (`POST /patients/{id}/emergency-access`); consent queue
+is `GET /admin/consent-tasks`; `answer_md` is rendered by `tabs/ask/answerParts.ts` (bold + inline
+`[[obj:Type:uuid]]` chips, no markdown library); the Lab viewer stacks thumbnail + heatmap `<img>` blobs
+from `/files` (same size, so no OpenSeadragon); the Lab tab lists `GET /patients/{id}/slides`;
+`ran_on` is in audit rows; the gateway has CORS middleware. `scribeApi` in `hooks.ts` is dead code (LiveScribe replaced it).
+
+Node: the shell may have Node 18; the app needs ≥20.19. Electron bundles Node 22, so gates run as
+`ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run`
+(same for `electron-vite/bin/electron-vite.js build` and `@playwright/test/cli.js test`).
 
 ## Next steps, in order
 
@@ -133,10 +137,12 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
    Go live route by route with `VITE_LIVE_ROUTES` (see `docs/BACKEND_HANDOFF.md`), then `VITE_USE_MOCKS=false`.
 3. ~~Admin tab: pending consent tasks + "Record consent".~~ Consent queue done. Left: role matrix and
    care teams (spec 14.2).
-4. Lab: OpenSeadragon viewer + heatmap overlay + real tiles from `GET /files/{path}`.
+4. ~~Lab: heatmap overlay + real tiles from `GET /files/{path}`.~~ Done (stacked images; live once findings are seeded).
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).
 6. ~~Records tab (Blueprint Tree), Audit filters (Table2 + DateRangeInput).~~ Done.
 7. ~~One Playwright e2e over demo steps 1–7 (spec 18.5).~~ Done: `e2e/demo.spec.ts`.
+8. Left: Records tab → `/records-tree`, dashboard alert ack / task complete, Admin role matrix + care teams,
+   live walk with `make dev-desktop-full` after Ron's reseed.
 
 ## Scribe backend notes (Brandon's vlmlol prototype, reviewed earlier)
 

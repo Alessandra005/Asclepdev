@@ -27,6 +27,7 @@ import type {
   ScribeObservation,
   ScribeSession,
   ScribeWindow,
+  Slide,
   TranscriptRequest,
   User
 } from '../types'
@@ -69,6 +70,8 @@ const state = {
   /** Newest first. */
   transcripts: [] as MockTranscript[],
   finding: structuredClone(GREGORY_FINDING) as Finding,
+  /** Gregory's slide starts unanalyzed (demo steps 1 and 4); classify reveals the canned finding. */
+  analyzed: false,
   reportGenerated: false,
   audit: structuredClone(AUDIT_SEED) as AuditRow[],
   scribe: new Map<
@@ -375,6 +378,7 @@ export async function mockGateway(
     } satisfies LoginResponse
   }
   const u = userFromToken(token)
+  if (method === 'POST' && path === '/auth/refresh') return { access_token: token } // mock tokens never expire
 
   if (method === 'GET' && path === '/me') {
     return { user_id: u.id, role: u.role, permissions: ROLE_PERMISSIONS[u.role] } satisfies MeResponse
@@ -389,10 +393,25 @@ export async function mockGateway(
   if (method === 'GET' && path === '/patients') {
     const term = (q.get('q') ?? '').toLowerCase()
     const items = Object.values(PATIENTS)
-      .filter((p) => u.care_team === 'all' || (Array.isArray(u.care_team) && u.care_team.includes(p.id)))
+      .filter(
+        (p) =>
+          u.care_team === 'all' ||
+          (Array.isArray(u.care_team) && u.care_team.includes(p.id)) ||
+          p.mrn.toLowerCase() === term // exact MRN finds an off-team patient (name + MRN only)
+      )
       .filter((p) => !term || p.name.toLowerCase().includes(term) || p.mrn.toLowerCase().includes(term))
       .map(({ id, name, age, sex, mrn }) => ({ id, name, age, sex, mrn }))
     return { items, next_cursor: null }
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/emergency-access$/)) && method === 'POST') {
+    requirePerm(u, 'emergency_access')
+    const reason = ((body ?? {}) as { reason?: string }).reason?.trim() ?? ''
+    if (reason.length < 5) fail(422, 'VALIDATION_ERROR', 'Type the clinical reason for emergency access.')
+    if (!Array.isArray(u.care_team) || u.care_team.includes(r[1]!))
+      fail(409, 'CONFLICT', "You are already on this patient's care team.")
+    ;(u.care_team as string[]).push(r[1]!) // ponytail: mock grant never expires; the gateway enforces 60 min
+    audit(u, 'read', 'emergency_access', PATIENTS[r[1]!]?.name ?? null)
+    return { expires_at: new Date(Date.now() + 60 * 60_000).toISOString() }
   }
   if ((r = m(/^\/patients\/([^/]+)$/)) && method === 'GET') {
     requireCareTeam(u, r[1]!)
@@ -522,11 +541,23 @@ export async function mockGateway(
   }
   if ((r = m(/^\/patients\/([^/]+)\/findings$/))) {
     requireCareTeam(u, r[1]!, 'finding')
-    return { items: r[1] === IDS.gregory ? [state.finding] : [], next_cursor: null }
+    return { items: r[1] === IDS.gregory && state.analyzed ? [state.finding] : [], next_cursor: null }
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/slides$/))) {
+    requireCareTeam(u, r[1]!, 'slide')
+    const slide: Slide = {
+      id: state.finding.slide_id,
+      specimen_id: 'spec-gregory-rul',
+      specimen_label: state.finding.specimen_label,
+      uploaded_at: state.finding.provenance.ingested_at,
+      finding_id: state.analyzed ? state.finding.id : null
+    }
+    return { items: r[1] === IDS.gregory ? [slide] : [], next_cursor: null }
   }
   if ((r = m(/^\/slides\/([^/]+)\/classify$/)) && method === 'POST') {
     requirePerm(u, 'run_lab_technician')
     audit(u, 'classify', 'slide', 'Gregory Hale', true, { kind: 'lab_tech', ran_on: 'local' })
+    state.analyzed = true
     return state.finding
   }
   if ((r = m(/^\/findings\/([^/]+)\/report$/)) && method === 'POST') {
@@ -556,9 +587,9 @@ export async function mockGateway(
     return state.finding
   }
 
-  // ---- SPEC-QUESTION: source-detail lookup. Mock-only path until Ron defines the real route.
-  if ((r = m(/^\/__mock\/sources\/([^/]+)$/))) {
-    const rec = SOURCE_RECORDS[r[1]!]
+  // ---- GET /sources/{id}: citation source lookup
+  if ((r = m(/^\/sources\/([^/]+)$/))) {
+    const rec = SOURCE_RECORDS[decodeURIComponent(r[1]!)]
     if (!rec) fail(404, 'NOT_FOUND', 'Source record not found.')
     audit(u, 'read', rec!.citation.kind, 'Gregory Hale')
     return rec
@@ -810,10 +841,19 @@ export async function mockGateway(
       answer_md: confirmed
         ? 'Gregory has a **confirmed LUAD** finding (reviewed by ' +
           state.finding.reviewed_by +
-          '). Pembrolizumab is **backordered**; restock expected in 6 days.'
-        : 'Gregory has an **unverified** LUAD finding awaiting attending review. Pembrolizumab is **backordered**; restock expected in 6 days.',
+          ') [[obj:Finding:' +
+          CITATIONS['c-finding']!.object_id +
+          ']]. Pembrolizumab is **backordered**; restock expected in 6 days. [[obj:InventoryItem:' +
+          CITATIONS['c-pembro']!.object_id +
+          ']]'
+        : 'Gregory has an **unverified** LUAD finding awaiting attending review [[obj:Finding:' +
+          CITATIONS['c-finding']!.object_id +
+          ']]. Pembrolizumab is **backordered**; restock expected in 6 days. [[obj:InventoryItem:' +
+          CITATIONS['c-pembro']!.object_id +
+          ']]',
       citations: [CITATIONS['c-finding']!, CITATIONS['c-pembro']!],
-      conversation_id: 'conv-1'
+      conversation_id: 'conv-1',
+      verified: true
     } satisfies AskResponse
   }
 

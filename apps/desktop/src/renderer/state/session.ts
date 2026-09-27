@@ -7,6 +7,7 @@ interface SessionState {
   role: Role | null
   permissions: Permission[]
   signIn: (token: string, user: User) => void
+  setToken: (token: string) => void
   setMe: (role: Role, permissions: Permission[]) => void
   signOut: () => void
   can: (p: Permission) => boolean
@@ -19,6 +20,7 @@ export const useSession = create<SessionState>((set, get) => ({
   role: null,
   permissions: [],
   signIn: (token, user) => set({ token, user, role: user.role }),
+  setToken: (token) => set({ token }),
   setMe: (role, permissions) => set({ role, permissions }),
   signOut: () => set({ token: null, user: null, role: null, permissions: [] }),
   can: (p) => get().permissions.includes(p)

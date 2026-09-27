@@ -1,11 +1,10 @@
 /** Every server call goes through a TanStack Query hook here (spec 18.3). Keys are scoped by user. */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { gateway, USE_MOCKS, GatewayError } from './client'
+import { gateway, gatewayFile, GatewayError } from './client'
 import { useSession } from '@/state/session'
 import type {
   AskResponse,
   AuditRow,
-  Citation,
   ConsentDecision,
   ConsentTask,
   DashboardResponse,
@@ -29,6 +28,7 @@ import type {
   ScribeSession,
   ScribeStopResponse,
   ScribeWindow,
+  Slide,
   SourceRecord,
   TranscriptRequest,
   TranscriptStatus
@@ -69,6 +69,20 @@ export const usePatient = (id: string | null) => {
     queryFn: () => gateway<Patient>(`/patients/${id}`),
     enabled: !!id,
     retry: (n, e) => !(e instanceof GatewayError && e.status < 500) && n < 2
+  })
+}
+
+/** Break-the-glass (spec 13): 60 minutes of access. Refetch the chart only after the gateway grants it. */
+export const useEmergencyAccess = (patientId: string) => {
+  const qc = useQueryClient()
+  const k = useUserKey()
+  return useMutation({
+    mutationFn: (reason: string) =>
+      gateway<{ expires_at: string }>(`/patients/${patientId}/emergency-access`, {
+        method: 'POST',
+        body: { reason }
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [k, 'patient', patientId] })
   })
 }
 
@@ -180,13 +194,38 @@ export const useFindings = (patientId: string | null) => {
   })
 }
 
+export const useSlides = (patientId: string | null) => {
+  const k = useUserKey()
+  return useQuery({
+    queryKey: [k, 'patient', patientId, 'slides'],
+    queryFn: () => gateway<ListResponse<Slide>>(`/patients/${patientId}/slides`),
+    enabled: !!patientId
+  })
+}
+
+/** Heatmap / thumbnail / tile image from the Lab Technician. Cached as a Blob, cleared with the cache on logout. */
+export const useFileBlob = (url: string | null) => {
+  const k = useUserKey()
+  return useQuery({
+    queryKey: [k, 'file', url],
+    queryFn: () => gatewayFile(url!),
+    enabled: !!url,
+    staleTime: Infinity,
+    retry: false
+  })
+}
+
 export const useClassify = (patientId: string) => {
   const qc = useQueryClient()
   const k = useUserKey()
   return useMutation({
     mutationFn: (slideId: string) =>
       gateway<Finding>(`/slides/${slideId}/classify`, { method: 'POST', timeoutMs: LONG }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [k, 'patient', patientId, 'findings'] })
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: [k, 'patient', patientId, 'findings'] }),
+        qc.invalidateQueries({ queryKey: [k, 'patient', patientId, 'slides'] })
+      ])
   })
 }
 
@@ -207,20 +246,12 @@ export const useReviewFinding = (patientId: string) => {
   })
 }
 
-/**
- * SPEC-QUESTION: the spec has no public source-detail route. Mocks use /__mock/sources/{id}.
- * Replace `sourcePath` once Ron + Alessandra agree on the contract. Do not guess a route.
- */
-const sourcePath = (c: Pick<Citation, 'id'>): string | null => (USE_MOCKS ? `/__mock/sources/${c.id}` : null)
+/** GET /sources/{id}: the record a citation chip points to. Ids are '<Type>:<uuid>'. */
 export const useSourceRecord = (citationId: string | null) => {
   const k = useUserKey()
   return useQuery({
     queryKey: [k, 'source', citationId],
-    queryFn: () => {
-      const p = citationId ? sourcePath({ id: citationId }) : null
-      if (!p) throw new GatewayError(501, 'NOT_FOUND', 'Source lookup is not wired to the gateway yet.', null)
-      return gateway<SourceRecord>(p)
-    },
+    queryFn: () => gateway<SourceRecord>(`/sources/${encodeURIComponent(citationId!)}`),
     enabled: !!citationId
   })
 }

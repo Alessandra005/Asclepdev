@@ -4,7 +4,8 @@ import { mockGateway } from './mock/handler'
 
 export { GatewayError }
 
-const BASE = `${import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8000'}/api/v1`
+const ORIGIN = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8000'
+const BASE = `${ORIGIN}/api/v1`
 /** Mock gateway unless VITE_USE_MOCKS=false, so a fresh clone (no .env) runs with `pnpm dev`. */
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
@@ -184,4 +185,22 @@ async function send<T>(url: string, opts: RequestOptions, unreachable: string): 
     )
   }
   return (await res.json()) as T
+}
+
+/**
+ * GET a gateway file URL as it appears in a Finding (`/api/v1/files/...`). /files is care-team only
+ * (spec 15), so it needs the bearer token, and a bare <img src> would not send it.
+ */
+export async function gatewayFile(url: string): Promise<Blob> {
+  const token = getToken()
+  let res: Response
+  try {
+    res = await fetch(ORIGIN + url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  } catch {
+    throw new GatewayError(0, 'UPSTREAM_UNAVAILABLE', 'Cannot reach the Asclep gateway.', null)
+  }
+  if (res.status === 401) onUnauthorized()
+  if (!res.ok)
+    throw new GatewayError(res.status, 'NOT_FOUND', 'Image not available.', res.headers.get('X-Request-Id'))
+  return res.blob()
 }
