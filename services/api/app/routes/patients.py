@@ -71,9 +71,9 @@ def get_patient(patient_id: UUID,
     allergies = [{"substance": a["substance"], "provenance": _provenance(a)}
                  for a in _all(s, p, "Allergy", patient_id)]
     # The patient's home source is current; every other source that contributed records was merged in.
-    seen = [row["source_system"]]
+    seen = dict.fromkeys([row["source_system"]])  # ordered set: home source first
     for type_ in ("Allergy", "Condition", "Observation", "MedicationRequest"):
-        seen += [r["source_system"] for r in _all(s, p, type_, patient_id) if r["source_system"] not in seen]
+        seen.update(dict.fromkeys(r["source_system"] for r in _all(s, p, type_, patient_id)))
     sources = [{"source_system": src, "label": SOURCE_LABELS.get(src, src),
                 "status": "current" if i == 0 else "merged"} for i, src in enumerate(seen)]
     return {**_list_item(row), "allergies": allergies,
