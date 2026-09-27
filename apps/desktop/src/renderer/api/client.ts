@@ -48,9 +48,75 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
+/**
+ * Shared demo server (src/main/demoServer.ts): when set, mocked calls go over HTTP to the host's copy
+ * of the mock data, so several users on different windows or laptops see the same requests and
+ * consents. null = this app's own in-memory mock. Saved per computer: '' in storage means "chosen:
+ * this computer only"; nothing saved falls back to VITE_DEMO_SERVER (set by `pnpm demo:host`).
+ */
+const DEMO_KEY = 'asclep.demoServer'
+export const DEFAULT_DEMO_PORT = 8787
+
+/** "192.168.1.20" -> "http://192.168.1.20:8787". null if blank or not a URL. */
+export function normalizeDemoUrl(raw: string): string | null {
+  const t = raw.trim().replace(/\/+$/, '')
+  if (!t) return null
+  try {
+    const u = new URL(/^https?:\/\//i.test(t) ? t : `http://${t}`)
+    // Plain http is the host app itself (port 8787 unless given). An https link is a tunnel to it
+    // (e.g. cloudflared, for teammates on other networks) and keeps its own port.
+    if (u.protocol === 'http:' && !u.port) return `http://${u.hostname}:${DEFAULT_DEMO_PORT}`
+    return u.origin
+  } catch {
+    return null
+  }
+}
+
+function initialDemoServer(): string | null {
+  let saved: string | null = null
+  try {
+    saved = localStorage.getItem(DEMO_KEY)
+  } catch {
+    /* storage unavailable: use the default */
+  }
+  if (saved !== null) return normalizeDemoUrl(saved)
+  return normalizeDemoUrl(import.meta.env.VITE_DEMO_SERVER ?? '')
+}
+let demoServer: string | null = initialDemoServer()
+
+export const getDemoServer = (): string | null => demoServer
+export function setDemoServer(url: string | null): void {
+  demoServer = url === null ? null : normalizeDemoUrl(url)
+  try {
+    localStorage.setItem(DEMO_KEY, demoServer ?? '')
+  } catch {
+    /* not persisted; still applies for this session */
+  }
+}
+
+export interface DemoPing {
+  ok: true
+  host: string
+  urls: string[]
+}
+/** Checks a shared demo server is reachable before switching to it. */
+export async function pingDemoServer(url: string, timeoutMs = 4000): Promise<DemoPing> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${url}/demo/ping`, { signal: controller.signal })
+    if (!res.ok) throw new Error(String(res.status))
+    return (await res.json()) as DemoPing
+  } catch {
+    throw new GatewayError(0, 'UPSTREAM_UNAVAILABLE', `No Asclep demo server answered at ${url}.`, null)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** The only way the renderer talks to the backend. Same signature for mocks and the real gateway. */
 export async function gateway<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, form, query, timeoutMs = 30_000 } = opts
+  const { method = 'GET', body, form, query } = opts
   const qs = query
     ? '?' +
       new URLSearchParams(
@@ -59,6 +125,13 @@ export async function gateway<T>(path: string, opts: RequestOptions = {}): Promi
     : ''
 
   if (isMocked(path)) {
+    if (demoServer) {
+      return send<T>(
+        `${demoServer}/demo${path}${qs}`,
+        opts,
+        `Cannot reach the shared demo server at ${demoServer}.`
+      )
+    }
     try {
       return (await mockGateway(method, path + qs, body ?? form, getToken())) as T
     } catch (e) {
@@ -66,7 +139,12 @@ export async function gateway<T>(path: string, opts: RequestOptions = {}): Promi
       throw e
     }
   }
+  return send<T>(BASE + path + qs, opts, 'Cannot reach the Asclep gateway.')
+}
 
+/** HTTP transport for the real gateway and the shared demo server (same error envelope). */
+async function send<T>(url: string, opts: RequestOptions, unreachable: string): Promise<T> {
+  const { method = 'GET', body, form, timeoutMs = 30_000 } = opts
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   opts.signal?.addEventListener('abort', () => controller.abort())
@@ -77,14 +155,14 @@ export async function gateway<T>(path: string, opts: RequestOptions = {}): Promi
 
   let res: Response
   try {
-    res = await fetch(BASE + path + qs, {
+    res = await fetch(url, {
       method,
       headers,
       body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
       signal: controller.signal
     })
   } catch {
-    throw new GatewayError(0, 'UPSTREAM_UNAVAILABLE', 'Cannot reach the Asclep gateway.', null)
+    throw new GatewayError(0, 'UPSTREAM_UNAVAILABLE', unreachable, null)
   } finally {
     clearTimeout(timer)
   }

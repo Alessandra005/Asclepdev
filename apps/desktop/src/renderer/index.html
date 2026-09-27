@@ -3,9 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <title>Asclep</title>
+    <!-- connect-src allows http(s) anywhere: the gateway and a teammate's shared demo server (LAN IP or
+         https tunnel) are not on localhost. Scripts stay 'self' only. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:*; media-src 'self' blob: mediastream:; connect-src 'self' http://localhost:* ws://localhost:*"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:*; media-src 'self' blob: mediastream:; connect-src 'self' http: https: ws://localhost:*"
     />
   </head>
   <body>

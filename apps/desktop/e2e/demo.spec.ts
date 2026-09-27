@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 
 let app: ElectronApplication
@@ -17,7 +20,12 @@ test.beforeAll(async () => {
       // GitHub's Ubuntu runners block Electron's sandbox; local runs keep it.
       ...(process.env['CI'] ? ['--no-sandbox'] : [])
     ],
-    env: { ...parentEnv, ELECTRON_RENDERER_URL: '' }
+    // Fresh profile: a saved "Shared with team" choice from someone's own runs must not leak in.
+    env: {
+      ...parentEnv,
+      ELECTRON_RENDERER_URL: '',
+      ASCLEP_USER_DATA: mkdtempSync(join(tmpdir(), 'asclep-e2e-'))
+    }
   })
   page = await app.firstWindow()
 })

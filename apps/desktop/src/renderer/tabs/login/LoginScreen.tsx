@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Callout, Card, FormGroup, HTMLSelect, Icon, InputGroup } from '@blueprintjs/core'
 import { login } from '@/api/hooks'
-import { USE_MOCKS } from '@/api/client'
+import { getDemoServer, pingDemoServer, setDemoServer, USE_MOCKS } from '@/api/client'
 import { ErrorCallout } from '@/components/QueryState'
 import { useSession } from '@/state/session'
+import { DemoServerPicker } from './DemoServerPicker'
 
 const DEMO_USERS = [
   'reyes@asclep.demo',
@@ -41,6 +42,14 @@ export function LoginScreen() {
           <Icon icon="pulse" size={22} /> <span>Asclep</span>
         </div>
         <p className="muted">The layer that thinks. Synthetic demo data only.</p>
+        {USE_MOCKS && (
+          <DemoServerPicker
+            value={getDemoServer()}
+            onChange={setDemoServer}
+            ping={pingDemoServer}
+            hosting={window.asclep?.demoHost ?? false}
+          />
+        )}
         <form onSubmit={submit}>
           <FormGroup label="Email" labelFor="email">
             <InputGroup id="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />

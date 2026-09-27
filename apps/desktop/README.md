@@ -20,6 +20,39 @@ Sign in as `reyes@asclep.demo` / `asclep-demo`. Other demo users, same password:
 To rehearse the records-consent step in one window: as Dr. Reyes, open Gregory and click Request
 records; sign out; sign in as `admin` and record consent on the Admin tab; sign back in as Dr. Reyes.
 
+## Shared demo: two users at once
+
+By default each app keeps its own copy of the demo data. To have teammates signed in as different
+users see each other's actions (Dr. Reyes requests Gregory's records, the admin records consent,
+Dr. Reyes sees the merge), one person hosts and everyone else joins:
+
+1. **Host** (one laptop): `pnpm demo:host`. The app serves the demo data to the network, and its
+   login screen shows "Teammates join with http://192.168.x.x:8787". The first time, Windows asks
+   whether Electron may use the network: allow it on private networks.
+2. **Everyone else:** `pnpm dev`, then on the login screen choose **Shared with team**, type the
+   host's address (the IP alone is enough, e.g. `192.168.1.20`) and click **Connect**. Then sign in
+   as a different demo user from the host.
+3. **Two users on one laptop:** on the host, open the user menu → **New window (second user)** (or
+   Ctrl+Shift+N) and sign in there as someone else.
+
+Changes show up for the other users within a few seconds. The shared data lives in the host app's
+memory: closing it resets the demo, and joined apps then show "No Asclep demo server answered" until
+you pick **This computer** or the host comes back.
+
+**Not on the same Wi-Fi?** Teammates only need to reach port 8787 on the host. Either:
+
+- **Tunnel link (only the host installs anything):** `winget install Cloudflare.cloudflared`, then,
+  while `pnpm demo:host` runs, `cloudflared tunnel --url http://localhost:8787`. Share the
+  `https://....trycloudflare.com` link it prints; teammates paste the whole link as the host
+  address. A brand-new link can take a minute to start working: if Connect says no server answered,
+  wait and click Connect again. Anyone with the link can reach the demo (synthetic data only), so
+  share it privately.
+- **Shared VPN:** everyone joins the same Tailscale tailnet (or Radmin VPN network) and enters the
+  host's VPN address, e.g. `100.x.y.z`.
+
+Venue Wi-Fi often blocks laptop-to-laptop traffic even on the same network; the tunnel link avoids
+that too.
+
 ## Other commands
 
 ```

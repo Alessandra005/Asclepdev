@@ -18,6 +18,10 @@
     "vitest.config.ts",
     "src/main/**/*",
     "src/preload/**/*",
+    "src/renderer/api/errors.ts",
+    "src/renderer/api/types.ts",
+    "src/renderer/api/mock/handler.ts",
+    "src/renderer/api/mock/data.ts",
     "playwright.config.ts",
     "e2e/**/*"
   ]

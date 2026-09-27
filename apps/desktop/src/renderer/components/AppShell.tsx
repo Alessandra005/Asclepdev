@@ -13,7 +13,7 @@ import {
 } from '@blueprintjs/core'
 import { useSession } from '@/state/session'
 import { useUi, type TabId } from '@/state/ui'
-import { USE_MOCKS } from '@/api/client'
+import { getDemoServer, USE_MOCKS } from '@/api/client'
 import { PatientSearch } from './PatientSearch'
 import { SourceDrawer } from './SourceDrawer'
 
@@ -90,7 +90,13 @@ export function AppShell({ children, onSignOut }: { children: ReactNode; onSignO
         </Menu>
         <div className="nav-foot">
           {!navCollapsed && <div className="small muted">{user?.role.replace('_', ' ')}</div>}
-          {USE_MOCKS && !navCollapsed && <div className="mono tiny muted">SYNTHETIC DEMO · MOCK API</div>}
+          {USE_MOCKS && !navCollapsed && (
+            <div className="mono tiny muted">
+              {getDemoServer()
+                ? `SHARED DEMO · ${new URL(getDemoServer()!).host}`
+                : 'SYNTHETIC DEMO · MOCK API'}
+            </div>
+          )}
           <Button
             variant="minimal"
             size="small"
@@ -127,6 +133,14 @@ export function AppShell({ children, onSignOut }: { children: ReactNode; onSignO
                   onClick={toggleTheme}
                 />
                 <MenuDivider />
+                {window.asclep?.demoHost && (
+                  <MenuItem
+                    icon="add"
+                    text="New window (second user)"
+                    label="Ctrl+Shift+N"
+                    onClick={() => void window.asclep?.newWindow()}
+                  />
+                )}
                 <MenuItem icon="log-out" text="Sign out" onClick={onSignOut} />
               </Menu>
             }
