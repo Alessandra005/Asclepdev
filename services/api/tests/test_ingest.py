@@ -68,3 +68,11 @@ def test_imaging_documents_become_imaging_reports() -> None:
     assert _note(None, "p", {"type": {"text": "Contact note"}})[2]["kind"] == "progress"
     bad = {"type": {"text": "CT imaging report"}, "content": [{"attachment": {"data": "Q1O"}}]}
     assert _note(None, "p", bad)[2]["body"] == "CT imaging report"
+
+
+def test_observation_category_from_code_else_text() -> None:
+    from app.ingest.pipeline import _observation
+    coded = {"category": [{"coding": [{"code": "vital-signs"}]}], "code": {}}
+    assert _observation(None, "p", coded)[2]["category"] == "vital-signs"
+    assert _observation(None, "p", {"category": [{"text": " Laboratory"}], "code": {}})[2]["category"] == "laboratory"
+    assert _observation(None, "p", {"code": {}})[2]["category"] == "unknown"  # absent: never guessed

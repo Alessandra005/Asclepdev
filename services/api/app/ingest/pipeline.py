@@ -205,7 +205,9 @@ def _observation(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]
     interp = (r.get("interpretation") or [{}])[0].get("coding", [{}])[0].get("code")
     return "Observation", "observation", {
         "patient_id": patient_id,
-        "category": (r.get("category") or [{}])[0].get("coding", [{}])[0].get("code", "unknown"),
+        # A category's code, else its text (some sources send only {"text": "laboratory"}); never guessed.
+        "category": ((r.get("category") or [{}])[0].get("coding") or [{}])[0].get("code")
+        or ((r.get("category") or [{}])[0].get("text") or "unknown").strip().lower(),
         "loinc_code": code.get("code"), "display": code.get("display") or r.get("code", {}).get("text", "Observation"),
         "value_num": value_num, "value_text": value_text, "unit": unit, "ref_low": low, "ref_high": high,
         "interpretation": interp or _interpretation(value_num, low, high),
