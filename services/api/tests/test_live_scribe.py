@@ -37,6 +37,9 @@ class ScribeSession:
                     return "Dr. Maya Reyes"
                 return None
 
+            def first(self):
+                return None  # no break-the-glass grant
+
             def mappings(self):
                 class _M:
                     def first(self):

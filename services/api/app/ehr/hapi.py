@@ -1,7 +1,7 @@
 """HAPI FHIR R4 adapter used by both synthetic mock EHR providers."""
 
 import json
-from datetime import date
+from datetime import date, datetime
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -26,9 +26,26 @@ class HapiAdapter:
         payload = self._request("GET", f"/Patient?{urlencode(params)}")
         return [entry["resource"] for entry in payload.get("entry", []) if "resource" in entry]
 
-    def fetch_everything(self, fhir_patient_id: str) -> dict:
-        """Fetch all resources linked to one FHIR Patient."""
-        return self._request("GET", f"/Patient/{fhir_patient_id}/$everything")
+    def fetch_everything(self, fhir_patient_id: str, since: datetime | None = None) -> dict:
+        """Fetch all resources linked to one FHIR Patient; `since` pulls only newer ones (spec 11 step 4).
+        Follows the Bundle's next links, so a long history is never cut at HAPI's page size."""
+        query = f"?{urlencode({'_since': since.isoformat(), '_count': 500})}" if since else "?_count=500"
+        bundle = self._request("GET", f"/Patient/{fhir_patient_id}/$everything{query}")
+        page = bundle
+        while nxt := next((link["url"] for link in page.get("link", []) if link.get("relation") == "next"), None):
+            page = self._request("GET", self._relative(nxt))
+            bundle.setdefault("entry", []).extend(page.get("entry", []))
+        return bundle
+
+    def list_patient_ids(self) -> list[str]:
+        """Every Patient id on this server (admin ingest)."""
+        ids, page = [], self._request("GET", "/Patient?_elements=id&_count=500")
+        while True:
+            ids += [e["resource"]["id"] for e in page.get("entry", []) if "resource" in e]
+            nxt = next((link["url"] for link in page.get("link", []) if link.get("relation") == "next"), None)
+            if not nxt:
+                return ids
+            page = self._request("GET", self._relative(nxt))
 
     def write_diagnostic_report(self, report: dict) -> str:
         """Submit a DiagnosticReport through HAPI's transaction endpoint."""
@@ -53,6 +70,10 @@ class HapiAdapter:
             if resource_id:
                 return resource_id
         raise ValueError("HAPI transaction response did not contain a DiagnosticReport id")
+
+    def _relative(self, url: str) -> str:
+        """A paging link HAPI built with its own host name, made relative to our base URL."""
+        return url.split("/fhir", 1)[1] if "/fhir" in url else url.removeprefix(self.base_url)
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         """Send one JSON request and decode the FHIR JSON response."""

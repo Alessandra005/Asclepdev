@@ -74,15 +74,15 @@ def _attending_for(s: Session, patient_id: UUID) -> UUID | None:
 def evaluate_object(s: Session, object_type: str, object_id: UUID, patient_id: UUID | None, row: dict) -> list[UUID]:
     """Run every applicable rule against one newly-written object (the in-process
     hook per spec §12: 'Rules run after every ontology write')."""
-    from app.alerts.rules import critical_lab, finding_pending, med_backorder
+    from app.alerts.rules import allergy_med, critical_lab, finding_pending, med_backorder
 
     raised: list[UUID] = []
     dispatch = {
         "Observation": [critical_lab.check],
         "Finding": [finding_pending.check],
-        "MedicationRequest": [med_backorder.check],
-        # "Allergy": [allergy_med.check, source_conflict.check],
-        # "Condition": [source_conflict.check],
+        "MedicationRequest": [med_backorder.check, allergy_med.check],
+        "Allergy": [allergy_med.check],
+        # SOURCE_CONFLICT is per patient, raised by ingestion's link stage (app.ingest.pipeline)
     }
     for rule_fn in dispatch.get(object_type, []):
         for draft in rule_fn(s, object_id, patient_id, row) or []:
@@ -95,11 +95,11 @@ def sweep_all(s: Session) -> list[UUID]:
     """Periodic re-evaluation (spec §12: 'on a 60-second sweep'). Catches objects
     written before their notification target (e.g. care team) existed. Reuses
     raise_alert's dedup, so already-fired alerts are never duplicated."""
-    from app.alerts.rules import critical_lab, finding_pending, med_backorder
+    from app.alerts.rules import allergy_med, critical_lab, finding_pending, med_backorder
 
     raised: list[UUID] = []
 
-    rows = s.execute(text("""SELECT id, patient_id, display, value_num, value_text, interpretation
+    rows = s.execute(text("""SELECT id, patient_id, display, value_num, value_text, unit, interpretation
                               FROM observation WHERE interpretation IN ('HH', 'LL')""")).mappings().all()
     for r in rows:
         for draft in critical_lab.check(s, r["id"], r["patient_id"], dict(r)) or []:
@@ -110,7 +110,8 @@ def sweep_all(s: Session) -> list[UUID]:
     rows = s.execute(text("""SELECT id, patient_id, status, medication_id, requested_by
                               FROM medication_request WHERE status = 'active'""")).mappings().all()
     for r in rows:
-        for draft in med_backorder.check(s, r["id"], r["patient_id"], dict(r)) or []:
+        for draft in (med_backorder.check(s, r["id"], r["patient_id"], dict(r)) or []) + \
+                allergy_med.check(s, r["id"], r["patient_id"], dict(r)):
             alert_id = raise_alert(s, draft, r["id"])
             if alert_id:
                 raised.append(alert_id)

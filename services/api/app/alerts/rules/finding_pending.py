@@ -15,7 +15,7 @@ def check(s: Session, object_id: UUID, patient_id: UUID | None, row: dict) -> li
         return []
     return [AlertDraft(
         rule_id="FINDING_PENDING", severity="warning",
-        title=f"Finding awaiting review: {row.get('label', 'pathology result')}",
+        title="Biopsy finding awaiting review",
         detail=f"Confidence {row.get('confidence')}",
         patient_id=patient_id, user_id=attending, source_ids=[str(object_id)],
     )]

@@ -18,6 +18,9 @@ class FakeSession:
             def scalar(self_inner):
                 return None  # not on any care team
 
+            def first(self_inner):
+                return None  # no break-the-glass grant
+
             def mappings(self_inner):
                 class _M:
                     def first(self):

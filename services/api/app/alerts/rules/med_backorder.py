@@ -12,7 +12,8 @@ def check(s: Session, object_id: UUID, patient_id: UUID | None, row: dict) -> li
     if row.get("status") != "active" or row.get("medication_id") is None:
         return []
     inv = s.execute(
-        text("SELECT on_hand, backordered FROM inventory_item WHERE medication_id = :mid"),
+        text("""SELECT i.on_hand, i.backordered, m.name FROM inventory_item i JOIN medication m ON m.id = i.medication_id
+                WHERE i.medication_id = :mid"""),
         {"mid": row["medication_id"]},
     ).mappings().first()
     if inv is None or not (inv["backordered"] or inv["on_hand"] == 0):
@@ -22,7 +23,7 @@ def check(s: Session, object_id: UUID, patient_id: UUID | None, row: dict) -> li
     recipients = [requester] if requester else (_attendings_for(s, patient_id) if patient_id else [])
     return [AlertDraft(
         rule_id="MED_BACKORDER", severity="warning",
-        title="Medication backordered",
+        title=f"{(inv.get('name') or 'Medication').split(' ')[0]} {'backordered' if inv['backordered'] else 'out of stock'}",
         detail=f"Requested medication is {'backordered' if inv['backordered'] else 'out of stock'}.",
         patient_id=patient_id, user_id=uid, source_ids=[str(object_id)],
     ) for uid in recipients]

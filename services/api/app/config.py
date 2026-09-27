@@ -26,6 +26,8 @@ class Settings:
     ehr_b_url: str = os.getenv("EHR_B_URL", "http://localhost:8081/fhir")
     mongo_url: str = os.getenv("MONGO_URL", "mongodb://localhost:27017")
     mongo_db: str = os.getenv("MONGO_DB", "asclep")
+    resident_mock: bool = os.getenv("RESIDENT_MOCK", "1") == "1"  # AI steps then run locally, not on Claude
+    demo_tz: str = os.getenv("DEMO_TZ", "America/New_York")  # "today" for schedules and seeded appointments
 
 
 settings = Settings()

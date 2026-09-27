@@ -1,5 +1,6 @@
 """The ontology API: the ONLY door to clinical data (spec section 7A.8)."""
-from datetime import datetime, timezone
+import json
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.audit.log import write_audit
 from app.auth.principal import Principal
+from app.ontology import shapes
 from app.rbac.permissions import scope_for
 from asclep_contracts import ContextItem, ContextView
 from asclep_contracts.ontology import SubjectRef
@@ -19,9 +21,14 @@ _VIEWS = yaml.safe_load((Path(__file__).parent / "views.yaml").read_text())
 _CODE_GROUPS = yaml.safe_load((Path(__file__).parent / "code_groups.yaml").read_text())
 
 
+# Tables with 7A.4 record_status: superseded / entered-in-error rows never reach a screen or prompt.
+_VERSIONED = {"patient", "encounter", "observation", "condition", "allergy", "medication_request", "note", "referral"}
+
+
 class Filters(BaseModel):
     since: str | None = None
     category: str | None = None
+    loinc: str | None = None
     code_group: str | None = None
     status: str | None = None
 
@@ -91,11 +98,13 @@ def list_objects(s: Session, p: Principal, type: str, patient_id: UUID | None = 
         elif scope == "care_team":
             conditions.append("id IN (SELECT patient_id FROM care_team_member WHERE user_id = :uid)")
             params["uid"] = p.user_id
+        elif scope == "specimen_only":  # lab staff: patients with a specimen on file
+            conditions.append("id IN (SELECT patient_id FROM specimen)")
         else:
-            # specimen_only (lab_staff) or no scope at all: deny-by-default until
-            # a real specimen-assignment join exists.
-            # TODO(Alessandra): wire specimen_only properly once specimen assignment exists.
             conditions.append("1=0")
+
+    if table in _VERSIONED:
+        conditions.append("record_status = 'current'")
 
     if filters:
         if filters.status:
@@ -104,6 +113,13 @@ def list_objects(s: Session, p: Principal, type: str, patient_id: UUID | None = 
         if filters.category and type == "Observation":
             conditions.append("category = :category")
             params["category"] = filters.category
+        if filters.loinc and type == "Observation":
+            conditions.append("loinc_code = :loinc")
+            params["loinc"] = filters.loinc
+        if filters.since:
+            time_field = _REGISTRY["object_types"][type].get("time_field", "ingested_at")
+            conditions.append(f"{time_field} >= CAST(:since AS timestamptz)")
+            params["since"] = filters.since
         if filters.code_group:
             codes = _CODE_GROUPS.get(filters.code_group, {})
             all_codes = [c for group in codes.values() for c in group]
@@ -321,24 +337,119 @@ def apply_action(s: Session, p: Principal, action: str, payload: BaseModel) -> d
         return merge_transcript(s, p, payload)
     raise NotImplementedError(f"Alessandra: action '{action}' not implemented yet")
 
-def medication_stock(s: Session, medication_id: UUID | None) -> tuple[str | None, str | None]:
-    """(medication name, inventory status) for a MedicationRequest's medication_id.
 
-    Status is 'backordered' | 'low' | 'in_stock' (spec 12 MED_BACKORDER rules), or None when the
-    request isn't linked to a stocked medication. Not patient data, so no audit row.
-    """
-    if medication_id is None:
-        return None, None
-    row = s.execute(
-        text("""SELECT m.name, i.on_hand, i.reorder_point, i.backordered
-                FROM medication m LEFT JOIN inventory_item i ON i.medication_id = m.id
-                WHERE m.id = :mid LIMIT 1"""),
-        {"mid": medication_id},
-    ).mappings().first()
+def peek(s: Session, type: str, id: UUID) -> dict:
+    """One row by id with no RBAC or audit: callers check access (rbac.check_patient) before returning it."""
+    if type == "InventoryItem":
+        row = s.execute(text("""SELECT i.*, m.name FROM inventory_item i JOIN medication m ON m.id = i.medication_id
+                                WHERE i.id = :id"""), {"id": id}).mappings().first()
+    elif type == "MedicationRequest":
+        row = s.execute(text("""SELECT r.*, m.name FROM medication_request r LEFT JOIN medication m
+                                ON m.id = r.medication_id WHERE r.id = :id"""), {"id": id}).mappings().first()
+    else:
+        row = s.execute(text(f"SELECT * FROM {_table_for(type)} WHERE id = :id"), {"id": id}).mappings().first()
     if not row:
-        return None, None
-    if row["on_hand"] is None:
-        return row["name"], None
-    if row["backordered"] or row["on_hand"] == 0:
-        return row["name"], "backordered"
-    return row["name"], "low" if row["on_hand"] < row["reorder_point"] else "in_stock"
+        raise LookupError(f"{type} {id} not found")
+    return dict(row)
+
+
+def can_see_restricted(s: Session, p: Principal, patient_id: UUID | None) -> bool:
+    return patient_id is not None and _is_attending_for(s, p, patient_id)
+
+
+def patient_for_file(s: Session, path: str) -> UUID | None:
+    """The patient a Lab Technician image belongs to, so /files can apply the care-team rule."""
+    return s.execute(
+        text("""SELECT patient_id FROM finding WHERE heatmap_path = :p OR thumbnail_path = :p
+                OR top_tiles @> CAST(:tile AS jsonb) LIMIT 1"""),
+        {"p": path, "tile": json.dumps([{"path": path}])},
+    ).scalar()
+
+
+def records_tree(s: Session, p: Principal, patient_id: UUID) -> list[dict]:
+    """records_tree(patient) view (7A.6): every object grouped by registry folder, newest first, no limits."""
+    folders: dict[str, list[dict]] = {}
+    for type_, entry in _REGISTRY["object_types"].items():
+        if not entry.get("folder") or entry.get("patient_field") != "patient_id":
+            continue
+        rows = list_objects(s, p, type_, patient_id=patient_id, limit=1000)["items"]
+        time_field = entry.get("time_field", "ingested_at")
+        for r in sorted(rows, key=lambda r: str(r.get(time_field) or r.get("ingested_at") or ""), reverse=True):
+            folders.setdefault(entry["folder"], []).append({
+                "type": type_, "id": r["id"], "title": shapes.title(type_, r),
+                "effective_at": r.get(time_field), "source_system": r.get("source_system") or "asclep",
+            })
+    return [{"name": name, "items": items} for name, items in folders.items()]
+
+
+def appointments(s: Session, p: Principal, day: date | None = None, patient_id: UUID | None = None) -> list[dict]:
+    """Schedule rows (desktop Appointment). Physicians see their own; nurses see their care-team patients'."""
+    own = "a.user_id = :uid" if p.role == "physician" else \
+        "a.patient_id IN (SELECT patient_id FROM care_team_member WHERE user_id = :uid)"
+    rows = s.execute(
+        text(f"""SELECT a.*, pt.given_name || ' ' || pt.family_name AS patient_name FROM appointment a
+                 JOIN patient pt ON pt.id = a.patient_id
+                 WHERE {own} AND (CAST(:day AS date) IS NULL OR a.start_at::date = CAST(:day AS date))
+                 AND (CAST(:pid AS uuid) IS NULL OR a.patient_id = CAST(:pid AS uuid))
+                 ORDER BY a.start_at"""),
+        {"uid": p.user_id, "day": day, "pid": patient_id},
+    ).mappings().all()
+    write_audit(s, p, "read", "Appointment", patient_id=patient_id)
+    status = {"booked": "scheduled", "arrived": "checked_in", "fulfilled": "completed"}
+    return [{"id": r["id"], "patient_id": r["patient_id"], "patient_name": r["patient_name"],
+             "starts_at": r["start_at"], "reason": r["reason"] or "Visit",
+             "status": status.get(r["status"], r["status"])} for r in rows]
+
+
+def create_task_for_attending(s: Session, patient_id: UUID, kind: str, title: str, ref_id: UUID) -> None:
+    """One open task per (attending, kind, ref): re-running an action never piles up duplicates."""
+    s.execute(text("""
+        INSERT INTO task (user_id, patient_id, kind, ref_id, title)
+        SELECT c.user_id, :pid, :kind, :ref, :title FROM care_team_member c
+        WHERE c.patient_id = :pid AND c.relationship = 'attending'
+          AND NOT EXISTS (SELECT 1 FROM task t WHERE t.user_id = c.user_id AND t.kind = :kind AND t.ref_id = :ref)"""),
+        {"pid": patient_id, "kind": kind, "ref": ref_id, "title": title})
+
+
+def create_task(s: Session, user_id: UUID, patient_id: UUID | None, kind: str, title: str, ref_id: UUID) -> None:
+    s.execute(text("""
+        INSERT INTO task (user_id, patient_id, kind, ref_id, title)
+        SELECT :uid, :pid, :kind, :ref, :title
+        WHERE NOT EXISTS (SELECT 1 FROM task WHERE user_id = :uid AND kind = :kind AND ref_id = :ref)"""),
+        {"uid": user_id, "pid": patient_id, "kind": kind, "ref": ref_id, "title": title})
+
+
+def complete_tasks(s: Session, kind: str, ref_id: UUID) -> None:
+    s.execute(text("UPDATE task SET done_at = now() WHERE kind = :k AND ref_id = :r AND done_at IS NULL"),
+              {"k": kind, "r": ref_id})
+
+
+def acknowledge_alerts(s: Session, rule_id: str, source_id: UUID) -> None:
+    """The problem an alert pointed at is resolved (e.g. the finding was reviewed): clear it for everyone."""
+    s.execute(text("""UPDATE alert SET acknowledged_at = now() WHERE rule_id = :r AND acknowledged_at IS NULL
+                      AND source_ids @> CAST(:src AS jsonb)"""), {"r": rule_id, "src": json.dumps([str(source_id)])})
+
+
+def finding_confirmed(s: Session, p: Principal, finding: dict) -> UUID:
+    """Link rule finding_confirmed (7A.2): only when a physician confirms, add a Condition and a `supports`
+    link, derived_by human with the physician as author."""
+    display = f"{shapes.LABEL_DISPLAY.get(finding['label'], finding['label'])}, pathology-confirmed"
+    condition_id = s.execute(text("""
+        INSERT INTO condition (patient_id, display, clinical_status, source_system, source_ref, effective_at)
+        VALUES (:pid, :disp, 'active', 'asclep', :ref, now()) RETURNING id"""),
+        {"pid": finding["patient_id"], "disp": display, "ref": f"Finding/{finding['id']}"}).scalar()
+    s.execute(text("""
+        INSERT INTO ontology_link (link_type, from_type, from_id, to_type, to_id, derived_by, created_by)
+        VALUES ('supports', 'Finding', :f, 'Condition', :c, 'human', :u) ON CONFLICT DO NOTHING"""),
+        {"f": finding["id"], "c": condition_id, "u": p.user_id})
+    write_audit(s, p, "create", "Condition", condition_id, finding["patient_id"], reason="finding_confirmed")
+    return condition_id
+
+
+def find_by_mrn(s: Session, p: Principal, mrn: str) -> dict | None:
+    """Exact-MRN lookup (name and MRN only); audited, because it can reach patients off the user's team."""
+    row = s.execute(text("SELECT * FROM patient WHERE lower(mrn) = lower(:m) AND record_status = 'current'"),
+                    {"m": mrn}).mappings().first()
+    if row:
+        write_audit(s, p, "read", "PatientLookup", row["id"], row["id"], reason="mrn_lookup")
+    return dict(row) if row else None

@@ -16,10 +16,12 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.alerts.engine import evaluate_object
+from app.alerts.engine import AlertDraft, _attendings_for, evaluate_object, raise_alert
 from app.audit.log import write_audit
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
+from app.ontology import links
+from app.ontology.shapes import SOURCE_LABELS
 
 
 class IngestBundleRequest(BaseModel):
@@ -308,6 +310,7 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
 
     patient_id_by_fhir_ref: dict[str, UUID] = {}
     counts: dict[str, int] = {}
+    touched: set[UUID] = set()
 
     def done(r) -> None:
         s.execute(text("UPDATE raw_record SET processed_at = :now WHERE id = :id"),
@@ -344,10 +347,27 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
         else:
             object_type, table, cols = _HANDLERS[rtype](s, patient_id, resource)
             row = _upsert(s, object_type, table, source_system, resource["id"], r["id"], cols)
+            if object_type == "MedicationRequest":
+                links.med_to_inventory(s, row)
             evaluate_object(s, object_type, row["id"], patient_id, row)
+        touched.add(patient_id)
         done(r)
 
+    for patient_id in touched | set(patient_id_by_fhir_ref.values()):  # stage 6: cross-source rules per patient
+        raise_source_conflicts(s, patient_id)
     return counts
+
+
+def raise_source_conflicts(s: Session, patient_id: UUID) -> None:
+    """SOURCE_CONFLICT (spec 11, 12): both records are kept; the attending is told which source lacks one."""
+    for c in links.cross_source_conflict(s, patient_id):
+        what = f"{c['name']} allergy" if c["object_type"] == "Allergy" else c["name"]
+        missing = ", ".join(SOURCE_LABELS.get(m, m) for m in c["missing_from"])
+        title = f"{what} not in {missing} records"
+        for uid in _attendings_for(s, patient_id):
+            raise_alert(s, AlertDraft("SOURCE_CONFLICT", "warning", title, detail=(
+                f"Recorded by {SOURCE_LABELS.get(c['source_system'], c['source_system'])}; absent from {missing}."),
+                patient_id=patient_id, user_id=uid, source_ids=[str(c["id"])]), c["id"])
 
 
 def ingest_bundle(s: Session, p: Principal, payload: IngestBundleRequest) -> dict:

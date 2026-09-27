@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
 from app.ingest.pipeline import land_bundle, process_raw_records
+from app.ontology.api import create_task
 
 
 class RequestTranscriptPayload(BaseModel):
@@ -84,9 +85,8 @@ def request_transcript(s: Session, p: Principal, payload: RequestTranscriptPaylo
                 VALUES (:pid, :uid, :provider, 'requested') RETURNING id"""),
         {"pid": payload.patient_id, "uid": p.user_id, "provider": payload.from_provider_id},
     ).scalar()
-    # SPEC-QUESTION(Ron): §11 step 2 says "a task for the admin" gets created here too
-    # (task.kind='review_transcript' per the task table's kind comment) — not wired
-    # in yet since app/tasks/ doesn't exist. Flagging so it's not silently dropped.
+    # Step 2's "task for the admin" is the consent queue itself: GET /admin/consent-tasks lists every
+    # open request, so no separate task row is needed.
     return get_request(s, request_id)
 
 
@@ -137,12 +137,13 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
             raise LookupError(f"{provider['name']} has no record of this patient.")
         source_patient_ref = matches[0]["id"]
 
-    # SPEC-QUESTION(Ron): §11 step 4 says the pull should be filtered to resources
-    # newer than the last merged request from this provider (incremental). Doing a
-    # full $everything fetch instead for MVP — raw_record's payload-hash dedup means
-    # nothing gets duplicated downstream, so this is a performance simplification,
-    # not a correctness gap.
-    bundle = adapter.fetch_everything(source_patient_ref)
+    # Spec 11 step 4: only resources newer than the last merge from this provider (nothing is re-requested).
+    since = s.execute(
+        text("""SELECT max(completed_at) FROM transcript_request WHERE patient_id = :pid
+                AND from_provider_id = :prov AND status = 'merged'"""),
+        {"pid": req["patient_id"], "prov": req["from_provider_id"]},
+    ).scalar()
+    bundle = adapter.fetch_everything(source_patient_ref, since=since)
 
     s.execute(text("UPDATE transcript_request SET status = 'fetched' WHERE id = :id"), {"id": req["id"]})
 
@@ -155,10 +156,10 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
                 completed_at = now() WHERE id = :id"""),
         {"n": total_imported, "id": req["id"]},
     )
-    # SPEC-QUESTION(Ron): §11 step 6 says the Resident generates a "What's new from
-    # Dr. One" summary here, and step 7 creates a review_transcript task for the
-    # requesting physician. Neither is wired in — Resident integration and app/tasks/
-    # are outside this workstream's current scope.
+    # Step 7: the requesting physician reviews what arrived. Step 6's "what's new" is the summary's
+    # new_from_sources, built from the merged rows (level 1 facts; see routes/patients.py).
+    label = PROVIDER_LABELS.get(provider["name"], provider["name"]).split(" ")[0]
+    create_task(s, req["requested_by"], req["patient_id"], "review_transcript", f"Review {label} records", req["id"])
     return get_request(s, req["id"])
 
 
