@@ -36,6 +36,7 @@ dev-desktop:
 
 # Routes the gateway serves for real go live; everything else stays on the desktop's mocks. Needs `make up seed`.
 LIVE_ROUTES = /auth/login,/auth/refresh,/me,/patients,/patients/*,/patients/*/summary,$\
+/patients/*/transcripts,/transcripts/*/consent,/admin/consent-tasks,$\
 /patients/*/live-scribe-sessions,/patients/*/live-scribe-sessions/*,/patients/*/live-scribe-sessions/*/window,$\
 /patients/*/live-scribe-sessions/*/stop,/patients/*/live-scribe-sessions/*/report,/patients/*/live-scribe-sessions/*/review
 dev-desktop-live:  ## desktop against the running stack (mixed mode)

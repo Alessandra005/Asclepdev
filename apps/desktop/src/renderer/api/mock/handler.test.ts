@@ -25,7 +25,7 @@ async function freshGateway() {
         ListResponse<TranscriptRequest>
       >,
     queue: () =>
-      gw('GET', '/__mock/admin/consent-tasks', undefined, ADMIN) as Promise<ListResponse<ConsentTask>>,
+      gw('GET', '/admin/consent-tasks', undefined, ADMIN) as Promise<ListResponse<ConsentTask>>,
     decide: (id: string, consent_ref: string, granted: boolean, token = ADMIN) =>
       gw('POST', `/transcripts/${id}/consent`, { consent_ref, granted }, token) as Promise<TranscriptRequest>,
     summary: () => gw('GET', `/patients/${IDS.gregory}/summary`, undefined, REYES) as Promise<PatientSummary>,

@@ -31,6 +31,10 @@ DEFAULT_PROVIDERS = [
 
 GOLDEN_DIR = Path("/srv/data/seed/golden")
 
+# Spec 16 seed step 3: Gregory's Riverside (ehr-a) history stays in ehr-a until the demo's transcript
+# request pulls it, so the chart visibly fills in on stage. Loaded into HAPI, not ingested.
+HELD_FOR_TRANSCRIPT_DEMO = {(DEFAULT_PROVIDERS[0]["id"], "gregory-a")}
+
 MEDICATIONS = [
     {"name": "Pembrolizumab 100 mg/4 mL", "on_hand": 0, "reorder_point": 5, "backordered": True, "restock_days": 6},
     {"name": "Carboplatin 450 mg/45 mL", "on_hand": 14, "reorder_point": 5, "backordered": False, "restock_days": None},
@@ -179,6 +183,9 @@ def seed_ingestion() -> None:
         targets = load_golden_bundles()
 
         for provider_id, fhir_patient_id in targets:
+            if (provider_id, fhir_patient_id) in HELD_FOR_TRANSCRIPT_DEMO:
+                logger.info(f"Holding back '{fhir_patient_id}' for the transcript-request demo (spec 16).")
+                continue
             logger.info(f"Ingesting patient '{fhir_patient_id}' from provider {provider_id}...")
             try:
                 req = IngestBundleRequest(provider_id=provider_id, fhir_patient_id=fhir_patient_id)

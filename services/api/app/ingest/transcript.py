@@ -16,6 +16,53 @@ class RequestTranscriptPayload(BaseModel):
     from_provider_id: UUID
 
 
+# The desktop has no provider list yet, so it sends a short key (docs/BACKEND_HANDOFF.md). Spec 16 providers.
+PROVIDER_KEYS = {"riverside": "ehr-a", "northside": "ehr-b"}
+PROVIDER_LABELS = {"ehr-a": "Riverside Family Medicine", "ehr-b": "Northside Oncology & Urology"}
+
+
+def resolve_provider_id(s: Session, key_or_id: str) -> UUID:
+    """A provider UUID, or a short key like 'riverside'. LookupError when neither matches."""
+    try:
+        return UUID(key_or_id)
+    except ValueError:
+        pass
+    name = PROVIDER_KEYS.get(key_or_id.strip().lower())
+    pid = s.execute(text("SELECT id FROM provider WHERE name = :n"), {"n": name}).scalar() if name else None
+    if pid is None:
+        raise LookupError(f"Unknown provider '{key_or_id}'.")
+    return pid
+
+
+_VIEW_SQL = """SELECT t.*, pr.name AS provider_name,
+                      p.given_name || ' ' || p.family_name AS patient_name, p.mrn AS patient_mrn,
+                      u.full_name AS requested_by_name
+               FROM transcript_request t
+               JOIN provider pr ON pr.id = t.from_provider_id
+               JOIN patient p ON p.id = t.patient_id
+               LEFT JOIN app_user u ON u.id = t.requested_by"""
+
+
+def _view(row, with_task: bool = False) -> dict:
+    """The desktop's TranscriptRequest (plus ConsentTask fields for the admin queue)."""
+    out = {k: row[k] for k in ("id", "patient_id", "status", "consent_ref", "resources_imported",
+                               "created_at", "completed_at")}
+    out["from_provider"] = PROVIDER_LABELS.get(row["provider_name"], row["provider_name"])
+    if with_task:  # demographics only: admins cannot read clinical data (spec 13)
+        out |= {k: row[k] for k in ("patient_name", "patient_mrn", "requested_by_name")}
+    return out
+
+
+def get_request(s: Session, request_id: UUID) -> dict:
+    return _view(s.execute(text(_VIEW_SQL + " WHERE t.id = :id"), {"id": request_id}).mappings().one())
+
+
+def list_consent_tasks(s: Session) -> list[dict]:
+    """Every request, newest first; the Admin tab splits pending from recently decided."""
+    rows = s.execute(text(_VIEW_SQL + " ORDER BY t.created_at DESC LIMIT 100")).mappings().all()
+    return [_view(r, with_task=True) for r in rows]
+
+
 class MergeTranscriptPayload(BaseModel):
     """Matches spec §15 route table: POST /transcripts/{id}/consent {consent_ref, granted}."""
     transcript_request_id: UUID
@@ -40,7 +87,7 @@ def request_transcript(s: Session, p: Principal, payload: RequestTranscriptPaylo
     # SPEC-QUESTION(Ron): §11 step 2 says "a task for the admin" gets created here too
     # (task.kind='review_transcript' per the task table's kind comment) — not wired
     # in yet since app/tasks/ doesn't exist. Flagging so it's not silently dropped.
-    return {"transcript_request_id": request_id, "status": "requested"}
+    return get_request(s, request_id)
 
 
 def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) -> dict:
@@ -60,7 +107,7 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
             text("UPDATE transcript_request SET status = 'denied', consent_ref = :ref WHERE id = :id"),
             {"ref": payload.consent_ref, "id": req["id"]},
         )
-        return {"transcript_request_id": req["id"], "status": "denied"}
+        return get_request(s, req["id"])
 
     s.execute(
         text("UPDATE transcript_request SET status = 'consented', consent_ref = :ref WHERE id = :id"),
@@ -80,18 +127,21 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
                 WHERE patient_id = :pid AND source_system = :src AND active"""),
         {"pid": req["patient_id"], "src": source_system},
     ).scalar()
+    adapter = HapiAdapter(provider_id=req["from_provider_id"], base_url=provider["fhir_base_url"])
     if not source_patient_ref:
-        raise LookupError(
-            f"No known identity link for this patient at {provider['name']} yet. "
-            f"Nothing to pull a transcript from."
-        )
+        # First pull from this provider: find the patient there by name + birth date (spec 8 identity rule).
+        pt = s.execute(text("SELECT given_name, family_name, birth_date FROM patient WHERE id = :id"),
+                       {"id": req["patient_id"]}).mappings().one()
+        matches = adapter.search_patient(pt["family_name"], pt["given_name"], pt["birth_date"])
+        if not matches:
+            raise LookupError(f"{provider['name']} has no record of this patient.")
+        source_patient_ref = matches[0]["id"]
 
     # SPEC-QUESTION(Ron): §11 step 4 says the pull should be filtered to resources
     # newer than the last merged request from this provider (incremental). Doing a
     # full $everything fetch instead for MVP — raw_record's payload-hash dedup means
     # nothing gets duplicated downstream, so this is a performance simplification,
     # not a correctness gap.
-    adapter = HapiAdapter(provider_id=req["from_provider_id"], base_url=provider["fhir_base_url"])
     bundle = adapter.fetch_everything(source_patient_ref)
 
     s.execute(text("UPDATE transcript_request SET status = 'fetched' WHERE id = :id"), {"id": req["id"]})
@@ -109,8 +159,7 @@ def merge_transcript(s: Session, p: Principal, payload: MergeTranscriptPayload) 
     # Dr. One" summary here, and step 7 creates a review_transcript task for the
     # requesting physician. Neither is wired in — Resident integration and app/tasks/
     # are outside this workstream's current scope.
-    return {"transcript_request_id": req["id"], "status": "merged",
-            "resources_imported": total_imported, "processed": counts}
+    return get_request(s, req["id"])
 
 
 def list_transcripts_for_patient(s: Session, p: Principal, patient_id: UUID) -> list[dict]:
@@ -120,8 +169,6 @@ def list_transcripts_for_patient(s: Session, p: Principal, patient_id: UUID) -> 
     ).scalar()
     if rel is None:
         raise PermissionError("You are not on this patient's care team.")
-    rows = s.execute(
-        text("SELECT * FROM transcript_request WHERE patient_id = :pid ORDER BY created_at DESC"),
-        {"pid": patient_id},
-    ).mappings().all()
-    return [dict(r) for r in rows]
+    rows = s.execute(text(_VIEW_SQL + " WHERE t.patient_id = :pid ORDER BY t.created_at DESC"),
+                     {"pid": patient_id}).mappings().all()
+    return [_view(r) for r in rows]

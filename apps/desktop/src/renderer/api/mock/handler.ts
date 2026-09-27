@@ -516,7 +516,7 @@ export async function mockGateway(
     return toRequest(t)
   }
   // ---- SPEC-QUESTION: admin consent queue. Mock-only path until Ron + Alessandra define the route.
-  if (method === 'GET' && path === '/__mock/admin/consent-tasks') {
+  if (method === 'GET' && path === '/admin/consent-tasks') {
     requirePerm(u, 'record_consent')
     return { items: state.transcripts.map(toTask), next_cursor: null } satisfies ListResponse<ConsentTask>
   }

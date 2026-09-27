@@ -1,6 +1,6 @@
 /** Every server call goes through a TanStack Query hook here (spec 18.3). Keys are scoped by user. */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { gateway, isMocked, USE_MOCKS, GatewayError } from './client'
+import { gateway, USE_MOCKS, GatewayError } from './client'
 import { useSession } from '@/state/session'
 import type {
   AskResponse,
@@ -148,25 +148,14 @@ export const useRequestTranscript = (patientId: string) => {
   })
 }
 
-/**
- * SPEC-QUESTION: spec 11 says the gateway creates "a task for the admin", but spec 15 has no route
- * that lists pending consent tasks. Mocks serve /__mock/admin/consent-tasks; against the real gateway
- * this shows an honest error until Ron + Alessandra define the route. Do not guess a route.
- */
-const CONSENT_QUEUE_PATH = '/__mock/admin/consent-tasks'
-const consentQueueWired = isMocked(CONSENT_QUEUE_PATH)
+/** Spec 11 step 2's "task for the admin": GET /admin/consent-tasks (services/api/app/routes/transcripts.py). */
 export const useConsentTasks = () => {
   const k = useUserKey()
   return useQuery({
     queryKey: [k, 'consent-tasks'],
-    queryFn: () => {
-      if (!consentQueueWired)
-        throw new GatewayError(501, 'NOT_FOUND', 'Consent queue is not wired to the gateway yet.', null)
-      return gateway<ListResponse<ConsentTask>>(CONSENT_QUEUE_PATH)
-    },
+    queryFn: () => gateway<ListResponse<ConsentTask>>('/admin/consent-tasks'),
     // Requests made under another login (the physician's window) show up without a reload.
-    refetchInterval: consentQueueWired ? 3000 : false,
-    retry: consentQueueWired ? 3 : false
+    refetchInterval: 3000
   })
 }
 

@@ -75,7 +75,6 @@ All lists are `{items, next_cursor}`. Every clinical object carries
   admin", but no route lists those tasks. The route name is Ron's call. The UI needs
   `{items: ConsentTask[], next_cursor}` with every status, newest first (it splits pending from recently
   decided). `ConsentTask` is a `TranscriptRequest` plus `patient_name, patient_mrn, requested_by_name`:
-  demographics only, since admins cannot read clinical data. The mock serves this at
-  `/__mock/admin/consent-tasks`. Against the real gateway, the Admin tab shows "Consent queue is not
-  wired to the gateway yet." until the route exists.
+  demographics only, since admins cannot read clinical data. **Done:** `GET /admin/consent-tasks`
+  (gateway and mock).
 - **Dr. Wu's access-denied path** (demo step 9), and the slide tile/heatmap source for OpenSeadragon.

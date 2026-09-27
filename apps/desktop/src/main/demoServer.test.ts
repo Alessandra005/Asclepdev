@@ -62,7 +62,7 @@ describe('shared demo server', () => {
     expect(req.status).toBe(200)
     expect(req.json['status']).toBe('requested')
 
-    const queue = await call('/__mock/admin/consent-tasks', { token: admin })
+    const queue = await call('/admin/consent-tasks', { token: admin })
     const items = queue.json['items'] as { id: string; patient_name: string; status: string }[]
     expect(items.some((t) => t.id === req.json['id'] && t.patient_name === 'Gregory Hale')).toBe(true)
 
