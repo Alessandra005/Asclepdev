@@ -177,6 +177,8 @@ def seed_slides(s: Session) -> None:
 def seed_appointments(s: Session) -> None:
     """Today's schedule for Dr. Reyes: the golden patients at their scripted times, then her other care-team
     patients (Synthea) in the remaining slots, up to 9 visits. Re-running adds nothing."""
+    # SPEC-QUESTION(Alessandra): spec 16 wants 9 visits, from 12 Synthea patients on her team. Synthea output is
+    # not in the repo, so until it is loaded (services/mock-ehr/load_synthea.py) only the 3 golden visits exist.
     tz = ZoneInfo(settings.demo_tz)
     today = datetime.now(tz).date()
     others = s.execute(text("""SELECT patient_id FROM care_team_member WHERE user_id = :u
