@@ -3,10 +3,12 @@
 Two stages:
   1. land_bundle: every FHIR resource in a $everything Bundle -> raw_record (append-only).
   2. process_raw_records: unprocessed raw_record rows -> typed clinical tables,
-     with patient identity resolution and object_version history.
+     with patient identity resolution, upsert + object_version history, and alert rules.
 """
+import base64
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -15,20 +17,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.alerts.engine import evaluate_object
+from app.audit.log import write_audit
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
 
-# Only these resource types are mapped into clinical tables today. Everything else
-# still lands in raw_record for history/audit, but isn't surfaced through ontology yet. 
-_MAPPED_TYPES = {"Patient", "Encounter", "Observation", "Condition",
-                  "AllergyIntolerance", "MedicationRequest"}
-
-_RESOURCE_MAP = {
-    "Observation": {"ontology_type": "Observation", "table": "observation"},
-    "Condition": {"ontology_type": "Condition", "table": "condition"},
-    "AllergyIntolerance": {"ontology_type": "Allergy", "table": "allergy"},
-    "MedicationRequest": {"ontology_type": "MedicationRequest", "table": "medication_request"},
-}
 
 class IngestBundleRequest(BaseModel):
     """Internal request shape for apply_action('ingest_bundle', ...)."""
@@ -48,7 +40,8 @@ def _bundle_entries(bundle: dict) -> list[dict]:
 def land_bundle(s: Session, source_system: str, bundle: dict) -> list[UUID]:
     """Stage 1 (7A.3): insert every resource in the bundle as a raw_record row.
     Idempotent: (source_system, source_ref, payload_hash) is UNIQUE, so re-running
-    the same bundle is a no-op for unchanged resources."""
+    the same bundle is a no-op for unchanged, processed resources. Landed-but-unprocessed rows (a type with no
+    mapping yet, an orphan whose patient came later) come back, so they get processed once they can be."""
     landed_ids: list[UUID] = []
     for resource in _bundle_entries(bundle):
         resource_type = resource.get("resourceType")
@@ -59,7 +52,8 @@ def land_bundle(s: Session, source_system: str, bundle: dict) -> list[UUID]:
             text("""INSERT INTO raw_record (source_system, source_ref, resource_type, payload,
                     payload_hash, fetched_at)
                     VALUES (:src, :ref, :rtype, :payload, :hash, :fetched)
-                    ON CONFLICT (source_system, source_ref, payload_hash) DO NOTHING
+                    ON CONFLICT (source_system, source_ref, payload_hash)
+                    DO UPDATE SET fetched_at = EXCLUDED.fetched_at WHERE raw_record.processed_at IS NULL
                     RETURNING id"""),
             {"src": source_system, "ref": source_ref, "rtype": resource_type,
              "payload": json.dumps(resource), "hash": _payload_hash(resource),
@@ -71,9 +65,12 @@ def land_bundle(s: Session, source_system: str, bundle: dict) -> list[UUID]:
 
 
 def _find_or_create_patient(s: Session, source_system: str, fhir_patient: dict) -> UUID:
-    """Identity resolution (7A.4). Deterministic match on (source_system,
-    source_patient_ref) first; falls back to demographic match; else creates a new
-    canonical patient."""
+    """Identity resolution (7A.5 stage 4). Deterministic match on (source_system,
+    source_patient_ref) first; falls back to a demographic match; else creates a new
+    canonical patient. Every decision writes patient_identity and a system audit row (spec 8 rule 2).
+
+    SPEC-QUESTION(Alessandra): 7A.5 scores matches (0.9 auto-link, 0.6-0.9 identity_review hold). Only the
+    exact case-insensitive name + birth date match is built; the hold path needs the admin task flow first."""
     source_patient_ref = fhir_patient["id"]
 
     existing = s.execute(
@@ -89,24 +86,18 @@ def _find_or_create_patient(s: Session, source_system: str, fhir_patient: dict) 
     family = name.get("family", "")
     birth_date = fhir_patient.get("birthDate")
 
-    # Try a same-name-and-birthdate match against an already-linked patient from
-    # a *different* source (cross-source identity resolution).
     match = None
     if family and birth_date:
         match = s.execute(
-            text("""SELECT id FROM patient WHERE family_name = :fam AND given_name = :giv
+            text("""SELECT id FROM patient WHERE lower(family_name) = lower(:fam) AND lower(given_name) = lower(:giv)
                     AND birth_date = :dob LIMIT 1"""),
             {"fam": family, "giv": given, "dob": birth_date},
         ).scalar()
 
     if match:
-        patient_id = match
-        match_method = "demographic"
-        score = 0.9
+        patient_id, match_method, score = match, "demographic_score", 0.9
     else:
-        patient_id = uuid4()
-        match_method = "new"
-        score = 1.0
+        patient_id, match_method, score = uuid4(), "same_source_mrn", 1.0
         s.execute(
             text("""INSERT INTO patient (id, mrn, given_name, family_name, birth_date, sex,
                     source_system, source_ref)
@@ -123,19 +114,41 @@ def _find_or_create_patient(s: Session, source_system: str, fhir_patient: dict) 
         {"pid": patient_id, "src": source_system, "ref": source_patient_ref,
          "method": match_method, "score": score},
     )
+    # Principal None = actor_kind 'system'; never a fake user id (audit_log.actor_user_id is a foreign key).
+    write_audit(s, None, "update" if match else "create", "PatientIdentity", patient_id=patient_id,
+                reason=f"{match_method}: {source_system}/{source_patient_ref}")
     return patient_id
 
 
-def _record_version(s: Session, object_type: str, object_id: UUID, data: dict, raw_record_id: UUID) -> None:
-    version = s.execute(
-        text("SELECT COALESCE(MAX(version), 0) + 1 FROM object_version WHERE object_type = :t AND object_id = :i"),
-        {"t": object_type, "i": object_id},
-    ).scalar()
+def _upsert(s: Session, object_type: str, table: str, source_system: str, source_ref: str,
+            raw_record_id: UUID, cols: dict) -> dict:
+    """Stage 5 (7A.5): upsert on (source_system, source_ref) so re-ingesting never duplicates (spec 8 rule 1).
+    Only newly landed payloads get here, so an existing row means the source changed it: the current row
+    is copied to object_version and its version bumped. Never hard-deletes."""
+    params = {**cols, "src": source_system, "ref": source_ref, "raw": raw_record_id}
+    current = s.execute(text(f"SELECT * FROM {table} WHERE source_system = :src AND source_ref = :ref"),
+                        params).mappings().first()
+    if current is None:
+        names, values = ", ".join(cols), ", ".join(f":{c}" for c in cols)
+        return dict(s.execute(
+            text(f"""INSERT INTO {table} (id, {names}, source_system, source_ref, raw_record_id)
+                     VALUES (:id, {values}, :src, :ref, :raw) RETURNING *"""),
+            {**params, "id": uuid4()},
+        ).mappings().one())
     s.execute(
+        # Rows ingested before upserts existed already have a version-1 snapshot of their original payload.
         text("""INSERT INTO object_version (object_type, object_id, version, data, raw_record_id)
-                VALUES (:t, :i, :v, :d, :r)"""),
-        {"t": object_type, "i": object_id, "v": version, "d": json.dumps(data), "r": raw_record_id},
+                VALUES (:t, :i, :v, :d, :r) ON CONFLICT (object_type, object_id, version) DO NOTHING"""),
+        {"t": object_type, "i": current["id"], "v": current["version"],
+         "d": json.dumps(dict(current), default=str), "r": current["raw_record_id"]},
     )
+    sets = ", ".join(f"{c} = :{c}" for c in cols)
+    return dict(s.execute(
+        text(f"""UPDATE {table} SET {sets}, version = version + 1, raw_record_id = :raw, ingested_at = now()
+                 WHERE id = :id RETURNING *"""),
+        {**params, "id": current["id"]},
+    ).mappings().one())
+
 
 def _normalize_lab_value(
     loinc_code: str | None,
@@ -156,111 +169,131 @@ def _normalize_lab_value(
 
     return float(value_num), None
 
-def _process_observation(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
-    code = (resource.get("code", {}).get("coding") or [{}])[0]
-    display_fallback = resource.get("code", {}).get("text", "Observation")
-    
+
+def _interpretation(value: float | None, low: float | None, high: float | None) -> str | None:
+    """7A.5 stage 3: recompute H/L/N from the reference range when the source omitted it."""
+    if value is None or (low is None and high is None):
+        return None
+    if high is not None and value > high:
+        return "H"
+    if low is not None and value < low:
+        return "L"
+    return "N"
+
+
+def _text(concept: dict | None) -> str | None:
+    """A CodeableConcept's text, else its first coding's display."""
+    concept = concept or {}
+    return concept.get("text") or (concept.get("coding") or [{}])[0].get("display")
+
+
+def _observation(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    code = (r.get("code", {}).get("coding") or [{}])[0]
     value_num, unit, value_text = None, None, None
-    if "valueQuantity" in resource:
-        value_num = resource["valueQuantity"].get("value")
-        unit = resource["valueQuantity"].get("unit")
-    elif "valueString" in resource:
-        value_text = resource["valueString"]
-    elif "valueCodeableConcept" in resource:
-        # Extra safety check if smoking status is stored as a concept string
-        concept = resource["valueCodeableConcept"]
-        value_text = concept.get("text") or (concept.get("coding") or [{}])[0].get("display")
+    if "valueQuantity" in r:
+        value_num = r["valueQuantity"].get("value")
+        unit = r["valueQuantity"].get("unit")
+    elif "valueString" in r:
+        value_text = r["valueString"]
+    elif "valueCodeableConcept" in r:  # e.g. smoking status
+        value_text = _text(r["valueCodeableConcept"])
+    ref_range = (r.get("referenceRange") or [{}])[0]
+    low, high = ref_range.get("low", {}).get("value"), ref_range.get("high", {}).get("value")
+    value_norm, unit_norm = _normalize_lab_value(code.get("code"), value_num, unit)
+    interp = (r.get("interpretation") or [{}])[0].get("coding", [{}])[0].get("code")
+    return "Observation", "observation", {
+        "patient_id": patient_id,
+        "category": (r.get("category") or [{}])[0].get("coding", [{}])[0].get("code", "unknown"),
+        "loinc_code": code.get("code"), "display": code.get("display") or r.get("code", {}).get("text", "Observation"),
+        "value_num": value_num, "value_text": value_text, "unit": unit, "ref_low": low, "ref_high": high,
+        "interpretation": interp or _interpretation(value_num, low, high),
+        "effective_at": r.get("effectiveDateTime"), "value_norm": value_norm, "unit_norm": unit_norm,
+    }
 
-    ref_range = (resource.get("referenceRange") or [{}])[0]
-    value_norm, unit_norm = _normalize_lab_value(
-        code.get("code"),
-        value_num,
-        unit,
-    )
 
-    obs_id = uuid4()
+def _condition(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    code = (r.get("code", {}).get("coding") or [{}])[0]
+    return "Condition", "condition", {
+        "patient_id": patient_id, "code": code.get("code"), "display": _text(r.get("code")) or "Condition",
+        "clinical_status": (r.get("clinicalStatus", {}).get("coding") or [{}])[0].get("code"),
+        "effective_at": r.get("onsetDateTime"),
+    }
+
+
+def _allergy(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    reaction = (r.get("reaction") or [{}])[0]
+    return "Allergy", "allergy", {
+        "patient_id": patient_id, "substance": _text(r.get("code")) or "Unknown substance",
+        "reaction": _text((reaction.get("manifestation") or [{}])[0]), "criticality": r.get("criticality"),
+        "effective_at": r.get("recordedDate") or r.get("onsetDateTime"),
+    }
+
+
+def _medication_request(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    med_name = _text(r.get("medicationCodeableConcept"))
+    # Exact-name match to the seeded medication; an unmatched name just doesn't link to inventory.
+    medication_id = s.execute(text("SELECT id FROM medication WHERE name = :name"),
+                              {"name": med_name}).scalar() if med_name else None
+    return "MedicationRequest", "medication_request", {
+        "patient_id": patient_id, "medication_id": medication_id, "status": r.get("status", "unknown"),
+        "dosage_text": (r.get("dosageInstruction") or [{}])[0].get("text", ""),
+        "requested_by": None,  # SPEC-QUESTION: golden fixtures don't carry a requester user id
+        "effective_at": r.get("authoredOn"),
+    }
+
+
+def _encounter(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    period = r.get("period", {})
+    return "Encounter", "encounter", {
+        "patient_id": patient_id, "type": _text((r.get("type") or [{}])[0]),
+        "reason": _text((r.get("reasonCode") or [{}])[0]),
+        "start_at": period.get("start"), "end_at": period.get("end"), "effective_at": period.get("start"),
+    }
+
+
+_IMAGING = re.compile(r"\b(imaging|x-?ray|ct|mri|radiolog\w*|ultrasound)\b", re.IGNORECASE)
+
+
+def _note(s: Session, patient_id: UUID, r: dict) -> tuple[str, str, dict]:
+    """DocumentReference -> note (spec 8); imaging reports become kind 'imaging_report' (7A.3)."""
+    attachment = (r.get("content") or [{}])[0].get("attachment", {})
+    try:
+        body = base64.b64decode(attachment.get("data") or "", validate=True).decode("utf-8", errors="replace")
+    except ValueError:  # malformed base64 must not abort the whole ingest (spec 8 rule 4); fall back to the type
+        body = ""
+    return "Note", "note", {
+        "patient_id": patient_id, "kind": "imaging_report" if _IMAGING.search(_text(r.get("type")) or "") else "progress",
+        "author_name": (r.get("author") or [{}])[0].get("display"),
+        "body": " ".join(body.split()) or _text(r.get("type")) or "Document",  # 7A.5: collapse whitespace
+        "effective_at": r.get("date"),
+    }
+
+
+def _specimen(s: Session, patient_id: UUID, r: dict) -> None:
+    """Specimen -> specimen (spec 8). That table has no source columns, so it upserts on its unique accession."""
+    accession = (r.get("accessionIdentifier") or {}).get("value") or r["id"]
     s.execute(
-        text("""INSERT INTO observation (id, patient_id, category,
-                loinc_code, display, value_num, value_text, unit,
-                ref_low, ref_high, interpretation,
-                source_system, source_ref, effective_at,
-                value_norm, unit_norm)
-                VALUES (:id, :pid, :cat, :code, :disp, :vnum, :vtext, :unit,
-                :lo, :hi, :interp, :src, :ref, :eff,
-                :vnorm, :unorm)"""),
-        {"id": obs_id, "pid": patient_id,
-         "cat": (resource.get("category") or [{}])[0].get("coding", [{}])[0].get("code", "unknown"),
-         "code": code.get("code"), 
-         "disp": code.get("display") or display_fallback,  # <-- USE display_fallback HERE
-         "vnum": value_num, "vtext": value_text, "unit": unit,
-         "lo": ref_range.get("low", {}).get("value"), "hi": ref_range.get("high", {}).get("value"),
-         "interp": (resource.get("interpretation") or [{}])[0].get("coding", [{}])[0].get("code"),
-         "vnorm": value_norm, "unorm": unit_norm,
-         "src": source_system, "ref": resource.get("id"), "eff": resource.get("effectiveDateTime")},
+        text("""INSERT INTO specimen (id, patient_id, accession, site, collected_at)
+                VALUES (:id, :pid, :acc, :site, :at)
+                ON CONFLICT (accession) DO UPDATE SET patient_id = EXCLUDED.patient_id, site = EXCLUDED.site,
+                collected_at = EXCLUDED.collected_at"""),
+        {"id": uuid4(), "pid": patient_id, "acc": accession, "site": _text(r.get("type")),
+         "at": (r.get("collection") or {}).get("collectedDateTime")},
     )
-    _record_version(s, "Observation", obs_id, resource, raw_record_id)
 
 
-def _process_condition(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
-    code = (resource.get("code", {}).get("coding") or [{}])[0]
-    cond_id = uuid4()
-    s.execute(
-        text("""INSERT INTO condition (id, patient_id, code, display, clinical_status,
-                source_system, source_ref, effective_at)
-                VALUES (:id, :pid, :code, :disp, :status, :src, :ref, :eff)"""),
-        {"id": cond_id, "pid": patient_id, "code": code.get("code"),
-         "disp": code.get("display", "Condition"),
-         "status": (resource.get("clinicalStatus", {}).get("coding") or [{}])[0].get("code"),
-         "src": source_system, "ref": resource["id"], "eff": resource.get("onsetDateTime")},
-    )
-    _record_version(s, "Condition", cond_id, resource, raw_record_id)
-
-
-def _process_allergy(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
-    code = resource.get("code", {})
-    substance = (code.get("coding") or [{}])[0].get("display") or code.get("text", "Unknown substance")
-    reaction = (resource.get("reaction") or [{}])[0]
-    allergy_id = uuid4()
-    s.execute(
-        text("""INSERT INTO allergy (id, patient_id, substance, reaction, criticality,
-                source_system, source_ref)
-                VALUES (:id, :pid, :sub, :rxn, :crit, :src, :ref)"""),
-        {"id": allergy_id, "pid": patient_id, "sub": substance,
-         "rxn": (reaction.get("manifestation") or [{}])[0].get("coding", [{}])[0].get("display"),
-         "crit": resource.get("criticality"), "src": source_system, "ref": resource["id"]},
-    )
-    _record_version(s, "Allergy", allergy_id, resource, raw_record_id)
-
-
-def _process_medication_request(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
-    med_id = uuid4()
-    dosage = (resource.get("dosageInstruction") or [{}])[0].get("text", "")
-
-    med_concept = resource.get("medicationCodeableConcept", {})
-    med_name = med_concept.get("text") or (med_concept.get("coding") or [{}])[0].get("display")
-    medication_ref = None
-    if med_name:
-        medication_ref = s.execute(
-            text("SELECT id FROM medication WHERE name = :name"), {"name": med_name}
-        ).scalar()
-        # exact-name match only; a fixture whose medication name doesn't exactly match 
-        # the seeded medication.name won't link to inventory.
-
-    s.execute(
-        text("""INSERT INTO medication_request (id, patient_id, medication_id, status, dosage_text,
-                requested_by, source_system, source_ref)
-                VALUES (:id, :pid, :medid, :status, :dose, :reqby, :src, :ref)"""),
-        {"id": med_id, "pid": patient_id, "medid": medication_ref,
-         "status": resource.get("status", "unknown"), "dose": dosage,
-         "reqby": None,  # SPEC-QUESTION: golden fixtures don't carry a requester user id
-         "src": source_system, "ref": resource["id"]},
-    )
-    _record_version(s, "MedicationRequest", med_id, resource, raw_record_id)
-    return med_id
+_HANDLERS = {
+    "Observation": _observation,
+    "Condition": _condition,
+    "AllergyIntolerance": _allergy,
+    "MedicationRequest": _medication_request,
+    "Encounter": _encounter,
+    "DocumentReference": _note,
+}
 
 
 def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUID]) -> dict[str, int]:
-    """Stage 2 (7A.4-7A.5): map unprocessed raw_record rows into clinical tables."""
+    """Stages 4-5 and 8 (7A.5): map newly landed raw_record rows into clinical tables, then run alert rules."""
     if not raw_record_ids:
         return {}
 
@@ -276,26 +309,20 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
     patient_id_by_fhir_ref: dict[str, UUID] = {}
     counts: dict[str, int] = {}
 
-    for r in patients:
-        resource = json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"]
-        pid = _find_or_create_patient(s, source_system, resource)
-        patient_id_by_fhir_ref[resource["id"]] = pid
-        _record_version(s, "Patient", pid, resource, r["id"])
+    def done(r) -> None:
         s.execute(text("UPDATE raw_record SET processed_at = :now WHERE id = :id"),
                   {"now": datetime.now(timezone.utc), "id": r["id"]})
-        counts["Patient"] = counts.get("Patient", 0) + 1
+        counts[r["resource_type"]] = counts.get(r["resource_type"], 0) + 1
 
-    handlers = {
-        "Observation": _process_observation,
-        "Condition": _process_condition,
-        "AllergyIntolerance": _process_allergy,
-        "MedicationRequest": _process_medication_request,
-    }
+    for r in patients:
+        resource = json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"]
+        patient_id_by_fhir_ref[resource["id"]] = _find_or_create_patient(s, source_system, resource)
+        done(r)
 
     for r in others:
         rtype = r["resource_type"]
-        if rtype not in handlers:
-            continue
+        if rtype not in _HANDLERS and rtype != "Specimen":
+            continue  # spec 8 rule 4: unknown types are skipped (kept in raw_record), never crash
         resource = json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"]
 
         ref_obj = resource.get("subject") or resource.get("patient") or {}
@@ -312,20 +339,13 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
         if patient_id is None:
             continue  # can't attach an orphaned clinical resource; SPEC-QUESTION: log this?
 
-        handlers[rtype](s, patient_id, resource, source_system, r["id"])
-
-        mapping = _RESOURCE_MAP.get(rtype)
-        if mapping:
-            new_row = s.execute(
-                text(f"SELECT * FROM {mapping['table']} WHERE source_system = :s AND source_ref = :r"),
-                {"s": source_system, "r": resource["id"]},
-            ).mappings().first()
-            if new_row:
-                evaluate_object(s, mapping["ontology_type"], new_row["id"], patient_id, dict(new_row))
-
-        s.execute(text("UPDATE raw_record SET processed_at = :now WHERE id = :id"),
-                  {"now": datetime.now(timezone.utc), "id": r["id"]})
-        counts[rtype] = counts.get(rtype, 0) + 1
+        if rtype == "Specimen":
+            _specimen(s, patient_id, resource)
+        else:
+            object_type, table, cols = _HANDLERS[rtype](s, patient_id, resource)
+            row = _upsert(s, object_type, table, source_system, resource["id"], r["id"], cols)
+            evaluate_object(s, object_type, row["id"], patient_id, row)
+        done(r)
 
     return counts
 

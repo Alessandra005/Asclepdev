@@ -20,7 +20,7 @@ from app.ontology.api import apply_action
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ingest.seed")
 
-SYSTEM_PRINCIPAL = Principal(user_id=UUID("00000000-0000-0000-0000-000000000000"), role="admin")
+SYSTEM_PRINCIPAL = Principal(user_id=UUID("00000000-0000-0000-0000-000000000000"), role="admin", actor_kind="system")
 
 DEFAULT_PROVIDERS = [
     {"id": UUID("11111111-1111-1111-1111-111111111111"), "name": "ehr-a",
@@ -76,19 +76,6 @@ def ensure_medications_and_inventory(s: Session) -> dict[str, UUID]:
     logger.info("Medication + inventory seeds verified.")
     return ids
 
-def ensure_care_team(s: Session) -> None:
-    """SPEC-QUESTION(Ron): who owns real care-team assignment? Seeding a minimal
-    attending link per golden patient so alert rules have someone to notify."""
-    s.execute(
-        text("""INSERT INTO care_team_member (patient_id, user_id, relationship)
-                SELECT p.id, :uid, 'attending' FROM patient p
-                ON CONFLICT DO NOTHING"""),
-        {"uid": UUID("00000000-0000-0000-0000-000000000001")},  # your test admin user
-    )
-    s.commit()
-    logger.info("Care team seeds verified.")
-
-    
 def _wait_for_hapi(base_url: str, timeout: float = 90.0) -> None:
     deadline = time.monotonic() + timeout
     last_error = None
@@ -195,9 +182,6 @@ def seed_ingestion() -> None:
             except Exception as e:
                 session.rollback()
                 logger.error(f"Failed ingesting {fhir_patient_id}: {e}")
-
-        ensure_care_team(session)
-        session.commit()
 
         from app.alerts.engine import sweep_all
         raised = sweep_all(session)

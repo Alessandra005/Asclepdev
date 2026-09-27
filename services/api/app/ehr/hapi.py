@@ -69,3 +69,5 @@ class HapiAdapter:
         except HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"HAPI request failed with HTTP {error.code}: {detail}") from error
+        except ValueError as error:  # not FHIR JSON: an upstream failure, not the caller's ValueError (409)
+            raise RuntimeError(f"HAPI returned a non-JSON response for {path}") from error

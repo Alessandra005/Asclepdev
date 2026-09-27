@@ -33,6 +33,15 @@ def _table_for(type_: str) -> str:
     return entry["table"]
 
 
+def _code_column(type_: str) -> str:
+    return "loinc_code" if type_ == "Observation" else "code"  # observation has no `code`, condition no `loinc_code`
+
+
+def _status_column(type_: str) -> str:
+    # allergy has no status: its "current" filter is the 7A.4 record_status
+    return {"Condition": "clinical_status", "Allergy": "record_status"}.get(type_, "status")
+
+
 def _is_attending_for(s: Session, p: Principal, patient_id: UUID) -> bool:
     if scope_for("view_restricted", p.role) != "attending":
         return False
@@ -90,7 +99,7 @@ def list_objects(s: Session, p: Principal, type: str, patient_id: UUID | None = 
 
     if filters:
         if filters.status:
-            conditions.append("clinical_status = :status" if type == "Condition" else "status = :status")
+            conditions.append(f"{_status_column(type)} = :status")
             params["status"] = filters.status
         if filters.category and type == "Observation":
             conditions.append("category = :category")
@@ -99,7 +108,7 @@ def list_objects(s: Session, p: Principal, type: str, patient_id: UUID | None = 
             codes = _CODE_GROUPS.get(filters.code_group, {})
             all_codes = [c for group in codes.values() for c in group]
             if all_codes:
-                conditions.append("(loinc_code = ANY(:codes) OR code = ANY(:codes))")
+                conditions.append(f"{_code_column(type)} = ANY(:codes)")
                 params["codes"] = all_codes
 
     if cursor:
@@ -169,7 +178,7 @@ def context_view(s: Session, p: Principal, view: str, subject_id: UUID) -> Conte
     for include in recipe.get("include", []):
         itype = include["type"]
         table = _table_for(itype)
-        conditions = ["patient_id = :pid"]
+        conditions = ["id = :pid" if itype == "Patient" else "patient_id = :pid"]
         params: dict = {"pid": patient_id}
 
         filt = include.get("filter", {})
@@ -177,10 +186,10 @@ def context_view(s: Session, p: Principal, view: str, subject_id: UUID) -> Conte
             groups = filt["code_group"] if isinstance(filt["code_group"], list) else [filt["code_group"]]
             all_codes = [c for g in groups for group in _CODE_GROUPS.get(g, {}).values() for c in group]
             if all_codes:
-                conditions.append("(loinc_code = ANY(:codes) OR code = ANY(:codes))")
+                conditions.append(f"{_code_column(itype)} = ANY(:codes)")
                 params["codes"] = all_codes
         if "status" in filt:
-            conditions.append("clinical_status = :status" if itype == "Condition" else "status = :status")
+            conditions.append(f"{_status_column(itype)} = :status")
             params["status"] = filt["status"]
         if filt.get("exclude_self"):
             conditions.append("id != :self_id")
@@ -202,7 +211,7 @@ def context_view(s: Session, p: Principal, view: str, subject_id: UUID) -> Conte
         for r in rows:
             try:
                 title = title_tpl.format(**r)
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, TypeError):  # e.g. a date format on a NULL date
                 title = str(r.get("id"))
             items.append(ContextItem(
                 type=itype, id=r["id"], title=title,
