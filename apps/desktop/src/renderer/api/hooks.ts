@@ -9,6 +9,10 @@ import type {
   DashboardResponse,
   Finding,
   ListResponse,
+  LiveScribeReviewRequest,
+  LiveScribeSession,
+  LiveScribeSessionSummary,
+  LiveScribeWindow,
   MedicationRequest,
   LoginResponse,
   MeResponse,
@@ -232,4 +236,58 @@ export const scribeApi = {
     gateway<ScribeStopResponse>(`/scribe-sessions/${sessionId}/stop`, { method: 'POST', timeoutMs: LONG }),
   review: (sessionId: string, req: ScribeReviewRequest) =>
     gateway<Note>(`/scribe-sessions/${sessionId}/review`, { method: 'POST', body: req })
+}
+
+// ---- LiveScribing (camera + conversation; stored in MongoDB by the gateway)
+const liveBase = (patientId: string): string => `/patients/${patientId}/live-scribe-sessions`
+
+export interface LiveScribeWindowInput {
+  start: string
+  end: string
+  frames: Blob[]
+  /** Session time each frame was taken, HH:MM:SS; observations are stamped with these. */
+  frameTimes: string[]
+  audio: Blob | null
+}
+
+export const liveScribeApi = {
+  start: (patientId: string, consent_ref: string) =>
+    gateway<LiveScribeSession>(liveBase(patientId), { method: 'POST', body: { consent_ref } }),
+  window: (patientId: string, sessionId: string, w: LiveScribeWindowInput) => {
+    // Frames and audio go out in memory only; nothing is written to disk (privacy rule 2).
+    const form = new FormData()
+    form.append('window_start', w.start)
+    form.append('window_end', w.end)
+    w.frames.forEach((f, i) => form.append('frames', f, `frame_${i}.jpg`))
+    if (w.frameTimes.length) form.append('frame_times', w.frameTimes.join(','))
+    if (w.audio) form.append('audio', w.audio, 'audio.webm')
+    return gateway<LiveScribeWindow>(`${liveBase(patientId)}/${sessionId}/window`, {
+      method: 'POST',
+      form,
+      timeoutMs: LONG
+    })
+  },
+  stop: (patientId: string, sessionId: string) =>
+    gateway<LiveScribeSession>(`${liveBase(patientId)}/${sessionId}/stop`, {
+      method: 'POST',
+      timeoutMs: LONG
+    }),
+  get: (patientId: string, sessionId: string) =>
+    gateway<LiveScribeSession>(`${liveBase(patientId)}/${sessionId}`),
+  report: (patientId: string, sessionId: string, includedActionIds: string[]) =>
+    gateway<LiveScribeSession>(`${liveBase(patientId)}/${sessionId}/report`, {
+      method: 'POST',
+      body: { included_action_ids: includedActionIds }
+    }),
+  review: (patientId: string, sessionId: string, req: LiveScribeReviewRequest) =>
+    gateway<LiveScribeSession>(`${liveBase(patientId)}/${sessionId}/review`, { method: 'POST', body: req })
+}
+
+export const useLiveScribeSessions = (patientId: string | null) => {
+  const k = useUserKey()
+  return useQuery({
+    queryKey: [k, 'patient', patientId, 'live-scribe'],
+    queryFn: () => gateway<ListResponse<LiveScribeSessionSummary>>(liveBase(patientId!)),
+    enabled: !!patientId
+  })
 }

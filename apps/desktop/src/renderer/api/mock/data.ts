@@ -427,6 +427,31 @@ export const SCRIBE_SCRIPT = [
   [{ category: 'cough', text: 'Coughed 2 times', confidence: 0.88 }]
 ] as const
 
+/**
+ * LiveScribing conversation, one entry per 10-second window, aligned with SCRIBE_SCRIPT. Offsets are seconds
+ * into the window. Mirrors MOCK_SCRIPT in services/resident/app/live_scribe.py; keep the two in sync.
+ */
+export const LIVE_TRANSCRIPT_SCRIPT: readonly (readonly [number, number, string])[][] = [
+  [
+    [2, 6, 'Good morning, Gregory. How have you been feeling since your last visit?'],
+    [6, 10, 'Honestly, not great. I get short of breath walking up the stairs.']
+  ],
+  [
+    [1, 4, 'How long has that been going on?'],
+    [5, 10, "About three weeks. And this cough won't go away."]
+  ],
+  [
+    [1, 4, 'Any chest pain, or coughing up blood?'],
+    [5, 9, 'Some chest pain when I cough. No blood.']
+  ],
+  [
+    [1, 5, 'Have you noticed any weight loss or fevers?'],
+    [5, 9, "I've lost maybe eight pounds. No fevers."]
+  ],
+  [[1, 7, "I'm more tired than usual too. I nap every afternoon now."]],
+  [[1, 6, "Okay. Let's listen to your lungs and go over your recent results."]]
+]
+
 export const AUDIT_SEED: AuditRow[] = [
   {
     id: 'au1',

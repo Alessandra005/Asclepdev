@@ -5,7 +5,7 @@ let page: Page
 
 test.beforeAll(async () => {
   app = await electron.launch({
-    // Fake camera so the Scribe step runs without hardware. Audio stays denied by the main process.
+    // Fake camera and microphone so the LiveScribing step runs without hardware.
     args: [
       'out/main/index.js',
       '--use-fake-device-for-media-stream',
@@ -63,14 +63,19 @@ test('demo steps 1-7: Gregory Hale end to end (mock gateway)', async () => {
   await expect(page.getByText('Confirmed by Dr. Maya Reyes')).toBeVisible()
   await expect(page.getByText('Reviewed by Dr. Maya Reyes')).toBeVisible()
 
-  // 7. The Scribe: consent, camera, observations, draft note, accept.
+  // 7. LiveScribing: consent, camera + mic, conversation and observations, checked symptoms, report, accept.
   await page.getByRole('menuitem', { name: 'Patient' }).click()
-  await page.getByRole('button', { name: 'Start Scribe' }).click()
-  await page.getByText('Gregory Hale gave verbal consent').click()
-  await page.getByRole('button', { name: 'Start camera' }).click()
+  await page.getByRole('button', { name: 'LiveScribing' }).click()
+  await page.getByText(/Gregory Hale gave verbal consent/).click()
+  await page.getByRole('button', { name: 'Start LiveScribing' }).click()
   await expect(page.getByText(/Walked from the door to the chair/)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/short of breath walking up the stairs/)).toBeVisible()
   await page.getByRole('button', { name: 'Stop' }).click()
-  await page.getByRole('button', { name: 'Accept' }).click({ timeout: 30_000 })
+  // Blueprint draws its indicator over the input, so click through it.
+  await page.getByLabel(/Keep in report: Mentioned shortness of breath/).check({ force: true, timeout: 30_000 })
+  await page.getByRole('button', { name: 'Add 1 to scribing report' }).click()
+  await expect(page.getByText(/Possible symptoms \(selected by Dr\. Maya Reyes\)/)).toBeVisible()
+  await page.getByRole('button', { name: 'Accept' }).click()
   await expect(page.getByText(/Accepted by Dr\. Maya Reyes/)).toBeVisible()
 
   // The approved note reaches the chart; drafts never do.

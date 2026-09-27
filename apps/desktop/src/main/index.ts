@@ -33,14 +33,10 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // Scribe (spec 10.5): camera only. Grant 'media' for video; the renderer requests audio: false.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    if (permission === 'media') {
-      const types = (details as { mediaTypes?: string[] }).mediaTypes ?? []
-      callback(!types.includes('audio'))
-      return
-    }
-    callback(false)
+  // LiveScribing: camera + microphone. The renderer keeps frames and audio in memory only and the audio is
+  // transcribed on this machine (services/resident, Whisper). Every other permission stays denied.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'media')
   })
 
   createWindow()
