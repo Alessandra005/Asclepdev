@@ -1,10 +1,12 @@
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.errors import install_error_handlers
+from app.ingest import feeds
 from app.routes.admin import router as admin_router
 from app.routes.alerts import router as alerts_router
 from app.routes.clinical import router as clinical_router
@@ -15,7 +17,17 @@ from app.routes.live_scribe import router as live_scribe_router
 from app.routes.patients import router as patients_router
 from app.routes.transcripts import router as transcripts_router
 
-app = FastAPI(title="Asclep Gateway", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Polled feeds + the 60 s alert sweep run with the server (spec 7A.3, 12). Tests never enter this
+    (TestClient without `with`), and neither do CLI entry points like the seed or demo-check."""
+    stop = feeds.start()
+    yield
+    stop.set()
+
+
+app = FastAPI(title="Asclep Gateway", version="0.1.0", lifespan=lifespan)
 install_error_handlers(app)
 # Desktop renderer: Vite dev server in development, Origin "null" when packaged (apps/desktop/docs/BACKEND_HANDOFF.md).
 app.add_middleware(

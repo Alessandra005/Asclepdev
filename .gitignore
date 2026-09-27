@@ -23,3 +23,5 @@ data/generated/
 tools/*.jar
 # private docs
 *Spec*.pdf
+# demo edits to the live inventory feed (seeded from data/seed/inventory.csv)
+data/inbox/inventory.csv
