@@ -11,7 +11,7 @@ import { LabsView } from './LabsView'
 import { MedsView } from './MedsView'
 import { NotesView } from './NotesView'
 import { SourcesView } from './SourcesView'
-import { ScribePanel } from './ScribePanel'
+import { LiveScribePanel } from './LiveScribePanel'
 
 export function PatientTab() {
   return <RequirePatient>{(p) => <PatientBody patient={p} />}</RequirePatient>
@@ -88,7 +88,7 @@ function PatientBody({ patient }: { patient: Patient }) {
               </Tag>
             )}
           </Card>
-          <ScribePanel patient={patient} />
+          <LiveScribePanel patient={patient} />
         </div>
       ) : sub === 'labs' ? (
         <LabsView patient={patient} />

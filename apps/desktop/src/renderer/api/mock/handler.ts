@@ -9,11 +9,16 @@ import type {
   AuditRow,
   ErrorCode,
   Finding,
+  LiveScribeReviewRequest,
+  LiveScribeSession,
+  LiveScribeSessionSummary,
+  LiveScribeWindow,
   LoginResponse,
   MeResponse,
   Note,
   Patient,
   ReviewRequest,
+  ScribeAction,
   ScribeReviewRequest,
   ScribeObservation,
   ScribeSession,
@@ -35,6 +40,7 @@ import {
   GREGORY_REPORT,
   IDS,
   LINDA_LABS,
+  LIVE_TRANSCRIPT_SCRIPT,
   LINDA_NOTES,
   PRIYA_MEDS,
   PATIENTS,
@@ -63,6 +69,9 @@ const state = {
       obs: ScribeObservation[]
     }
   >(),
+  live: new Map<string, { session: LiveScribeSession; startedMs: number }>(),
+  /** Physician-accepted LiveScribing reports; they reach the Notes sub-tab like approved Scribe notes. */
+  liveNotes: [] as { patient_id: string; note: Note }[],
   /** Set true from the console (window.__asclepMock.failNext = true) to rehearse error states. */
   failNext: false
 }
@@ -150,6 +159,116 @@ function draftNote(obs: ScribeObservation[], secs: number, windows: number, cons
     'Session details',
     `- Duration ${clock(secs)}, ${windows} windows analyzed, consent ${consentRef}`
   ].join('\n')
+}
+
+// ---- LiveScribing mock: mirrors review_rules() in services/resident/app/live_scribe.py
+const VISUAL_WHY: Record<string, string> = {
+  cough: 'Coughing seen during the visit.',
+  respiratory: 'Visible breathing effort.',
+  mobility: 'How the patient moved around the room.',
+  posture: 'Posture held during the visit.',
+  movement: 'Notable movement during the visit.',
+  device_use: 'Use of a medical device or aid.'
+}
+const SAID_KEYWORDS: [string, string][] = [
+  ['short of breath', 'shortness of breath'],
+  ['breath', 'shortness of breath'],
+  ['chest pain', 'chest pain'],
+  ['pain', 'pain'],
+  ['cough', 'cough'],
+  ['tired', 'fatigue'],
+  ['fatigue', 'fatigue'],
+  ['weight', 'weight change'],
+  ['pounds', 'weight change'],
+  ['fever', 'fever'],
+  ['dizzy', 'dizziness'],
+  ['blood', 'bleeding']
+]
+function flagActions(s: LiveScribeSession): ScribeAction[] {
+  const out: Omit<ScribeAction, 'id'>[] = []
+  for (const [cat, why] of Object.entries(VISUAL_WHY)) {
+    const hits = s.observations.filter((o) => o.category === cat)
+    if (!hits.length) continue
+    const best = Math.max(...hits.map((o) => o.confidence))
+    out.push({
+      action: hits.length === 1 ? hits[0]!.text : `${hits[0]!.text} (seen ${hits.length} times)`,
+      times: hits.map((o) => o.t),
+      why_relevant: why,
+      confidence: hits.length > 1 || best >= 0.85 ? 'high' : best >= 0.6 ? 'medium' : 'low',
+      source: 'visual',
+      included: false
+    })
+  }
+  const said = new Map<string, { t: string; text: string }[]>()
+  for (const seg of s.transcript) {
+    const low = seg.text.toLowerCase()
+    if (low.includes('?')) continue // the doctor's questions are not symptoms
+    const hit = SAID_KEYWORDS.find(([w]) => low.includes(w) && !new RegExp(`\\bno\\s+${w}`).test(low))
+    if (hit) said.set(hit[1], [...(said.get(hit[1]) ?? []), seg])
+  }
+  for (const [symptom, segs] of said) {
+    out.push({
+      action: `Mentioned ${symptom}: "${segs[0]!.text}"`,
+      times: segs.map((x) => x.t),
+      why_relevant: 'Patient-reported in the conversation.',
+      confidence: 'medium',
+      source: 'conversation',
+      included: false
+    })
+  }
+  return out.map((a, i) => ({ ...a, id: `a${i + 1}` }))
+}
+function liveReportBody(s: LiveScribeSession, reviewer: string): string {
+  const secs = s.ended_at ? Math.round((Date.parse(s.ended_at) - Date.parse(s.started_at)) / 1000) : 0
+  const picked = s.actions.filter((a) => a.included)
+  return [
+    'Visit scribing report (LiveScribing)',
+    `Patient: ${s.patient.name}, MRN ${s.patient.mrn}`,
+    `Visit: ${s.started_at.slice(0, 16).replace('T', ' ')} UTC, duration ${clock(secs)}, ${s.windows_analyzed} windows, consent ${s.consent_ref}`,
+    '',
+    `Possible symptoms (selected by ${reviewer})`,
+    ...(picked.length
+      ? picked.map((a) => `- ${a.action} [${a.times.join(', ')}] (${a.source}, ${a.confidence} confidence)`)
+      : ['- None selected.']),
+    '',
+    'Visit summary (AI draft)',
+    `- ${s.summary ?? 'No summary.'}`,
+    '',
+    'Conversation',
+    `- ${s.transcript.length} transcript lines are stored with LiveScribing session ${s.id}.`
+  ].join('\n')
+}
+function liveView(s: LiveScribeSession): LiveScribeSession {
+  return {
+    ...s,
+    counts: {
+      observations: s.observations.length,
+      transcript: s.transcript.length,
+      actions: s.actions.length
+    }
+  }
+}
+function liveSummary(s: LiveScribeSession): LiveScribeSessionSummary {
+  const keys = [
+    'id',
+    'patient_id',
+    'patient',
+    'consent_ref',
+    'started_by_name',
+    'started_at',
+    'ended_at',
+    'end_reason',
+    'status',
+    'windows_analyzed',
+    'summary',
+    'counts'
+  ] as const
+  return Object.fromEntries(keys.map((k) => [k, s[k]])) as unknown as LiveScribeSessionSummary
+}
+function liveSession(pid: string, sid: string): { session: LiveScribeSession; startedMs: number } {
+  const x = state.live.get(sid)
+  if (!x || x.session.patient_id !== pid) return fail(404, 'NOT_FOUND', 'LiveScribing session not found.')
+  return x
 }
 
 function checkMerge(): void {
@@ -277,7 +396,8 @@ export async function mockGateway(
     const scribe = [...state.scribe.values()]
       .filter((x) => x.session.patient_id === pid && x.note?.status === 'final')
       .map((x) => x.note!)
-    const items = [...scribe, ...seeded].filter((n) => !q.get('kind') || n.kind === q.get('kind'))
+    const live = state.liveNotes.filter((x) => x.patient_id === pid).map((x) => x.note)
+    const items = [...live, ...scribe, ...seeded].filter((n) => !q.get('kind') || n.kind === q.get('kind'))
     return { items, next_cursor: null }
   }
   if ((r = m(/^\/patients\/([^/]+)\/transcripts$/))) {
@@ -419,6 +539,160 @@ export async function mockGateway(
     }
     audit(u, 'scribe_review', 'note', PATIENTS[s.session.patient_id]?.name ?? null)
     return s.note
+  }
+
+  // ---- LiveScribing (camera + conversation). Real gateway: services/api/app/routes/live_scribe.py
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions$/)) && method === 'POST') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'start_scribe')
+    const { consent_ref } = (body ?? {}) as { consent_ref?: string }
+    if (!consent_ref?.trim()) fail(422, 'VALIDATION_ERROR', 'consent_ref is required to start LiveScribing.')
+    const p = patientView(r[1]!)
+    const session: LiveScribeSession = {
+      id: uid(),
+      patient_id: p.id,
+      patient: { id: p.id, mrn: p.mrn, name: p.name, birth_date: '', sex: p.sex },
+      consent_ref: consent_ref!.trim(),
+      started_by_name: u.full_name,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      end_reason: null,
+      status: 'active',
+      windows_analyzed: 0,
+      summary: null,
+      counts: { observations: 0, transcript: 0, actions: 0 },
+      observations: [],
+      transcript: [],
+      actions: [],
+      report: null
+    }
+    state.live.set(session.id, { session, startedMs: Date.now() })
+    audit(u, 'create', 'scribe_session', p.name)
+    return liveView(session)
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions$/)) && method === 'GET') {
+    const pid = r[1]!
+    requireCareTeam(u, pid, null)
+    requirePerm(u, 'view_notes')
+    const items = [...state.live.values()]
+      .map((x) => liveView(x.session))
+      .filter((x) => x.patient_id === pid)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .map(liveSummary)
+    return { items, next_cursor: null }
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions\/([^/]+)\/window$/)) && method === 'POST') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'start_scribe')
+    const { session: s } = liveSession(r[1]!, r[2]!)
+    if (s.status !== 'active') fail(409, 'CONFLICT', 'This LiveScribing session has ended.')
+    const form = body as FormData
+    const start = String(form.get('window_start') ?? '00:00:00')
+    const startS = start.split(':').reduce((acc, x) => acc * 60 + Number(x), 0)
+    const i = Math.floor(startS / 10) % SCRIBE_SCRIPT.length
+    const observations = (SCRIBE_SCRIPT[i] ?? []).map((o) => ({ ...o, t: clock(startS + 3) }))
+    const transcript = (LIVE_TRANSCRIPT_SCRIPT[i] ?? []).map(([a, b, text]) => ({
+      t: clock(startS + a),
+      end: clock(startS + b),
+      text
+    }))
+    s.observations.push(...observations)
+    s.transcript.push(...transcript)
+    s.windows_analyzed += 1
+    audit(u, 'scribe_window', 'scribe_session', s.patient.name, true, { kind: 'scribe', ran_on: 'local' })
+    return {
+      session_id: s.id,
+      window_start: start,
+      window_end: String(form.get('window_end') ?? start),
+      observations,
+      transcript,
+      people_in_frame: 1,
+      quality_flags: []
+    } satisfies LiveScribeWindow
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions\/([^/]+)\/stop$/)) && method === 'POST') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'start_scribe')
+    const s = liveSession(r[1]!, r[2]!).session
+    if (s.status !== 'active') fail(409, 'CONFLICT', 'This LiveScribing session has already stopped.')
+    s.ended_at = new Date().toISOString()
+    s.end_reason = 'stopped'
+    s.status = 'review'
+    s.actions = flagActions(s)
+    s.summary = `${s.observations.length} visual observations and ${s.transcript.length} transcript lines; ${s.actions.length} possible symptoms flagged for the doctor to review.`
+    audit(u, 'scribe_stop', 'scribe_session', s.patient.name, true, { kind: 'resident', ran_on: 'local' })
+    return liveView(s)
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions\/([^/]+)$/)) && method === 'GET') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'view_notes')
+    return liveView(liveSession(r[1]!, r[2]!).session)
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions\/([^/]+)\/report$/)) && method === 'POST') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'review_scribe')
+    const s = liveSession(r[1]!, r[2]!).session
+    if (s.status !== 'review' && s.status !== 'report_draft')
+      fail(409, 'CONFLICT', 'The report can only be built after LiveScribing stops and before sign-off.')
+    const ids = new Set((body as { included_action_ids: string[] }).included_action_ids)
+    const unknown = [...ids].filter((id) => !s.actions.some((a) => a.id === id))
+    if (unknown.length) fail(422, 'VALIDATION_ERROR', `Unknown action ids: ${unknown.join(', ')}.`)
+    s.actions = s.actions.map((a) => ({ ...a, included: ids.has(a.id) }))
+    s.report = {
+      body: liveReportBody(s, u.full_name),
+      included_action_ids: s.actions.filter((a) => a.included).map((a) => a.id),
+      status: 'draft',
+      drafted_by_name: u.full_name,
+      drafted_at: new Date().toISOString(),
+      reviewed_by_name: null,
+      reviewed_at: null
+    }
+    s.status = 'report_draft'
+    audit(u, 'update', 'scribe_session', s.patient.name)
+    return liveView(s)
+  }
+  if ((r = m(/^\/patients\/([^/]+)\/live-scribe-sessions\/([^/]+)\/review$/)) && method === 'POST') {
+    requireCareTeam(u, r[1]!, null)
+    requirePerm(u, 'review_scribe')
+    const s = liveSession(r[1]!, r[2]!).session
+    const draft = s.report
+    if (s.status !== 'report_draft' || !draft)
+      return fail(409, 'CONFLICT', 'There is no report draft to review.')
+    const req = body as LiveScribeReviewRequest
+    if (req.action === 'edit' && !req.body?.trim())
+      fail(422, 'VALIDATION_ERROR', 'An edited report needs a body.')
+    const discard = req.action === 'discard'
+    const reviewedAt = new Date().toISOString()
+    s.report = {
+      ...draft,
+      body: req.action === 'edit' ? (req.body ?? '').trim() : draft.body,
+      status: discard ? 'discarded' : 'final',
+      reviewed_by_name: u.full_name,
+      reviewed_at: reviewedAt
+    }
+    s.status = discard ? 'discarded' : 'accepted'
+    if (!discard) {
+      state.liveNotes.unshift({
+        patient_id: s.patient_id,
+        note: {
+          id: uid(),
+          kind: 'visual_scribe',
+          title: 'Visit scribing report (LiveScribing)',
+          body: s.report.body,
+          author_name: 'LiveScribing (AI), approved by ' + u.full_name,
+          effective_at: reviewedAt,
+          is_legal_record: false,
+          status: 'final',
+          provenance: {
+            source_system: 'asclep',
+            source_ref: 'LiveScribeSession/' + s.id,
+            ingested_at: reviewedAt
+          }
+        }
+      })
+    }
+    audit(u, 'sign', 'scribe_session', s.patient.name)
+    return liveView(s)
   }
 
   // ---- Ask

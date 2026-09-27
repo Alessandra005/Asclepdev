@@ -9,6 +9,8 @@ class Settings:
     resident_url: str = os.getenv("RESIDENT_URL", "http://localhost:8200")
     ehr_a_url: str = os.getenv("EHR_A_URL", "http://localhost:8080/fhir")
     ehr_b_url: str = os.getenv("EHR_B_URL", "http://localhost:8081/fhir")
+    mongo_url: str = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+    mongo_db: str = os.getenv("MONGO_DB", "asclep")
 
 
 settings = Settings()

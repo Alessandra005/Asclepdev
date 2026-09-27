@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, UploadFile
 
+from app.live_scribe import router as live_scribe_router
 from asclep_contracts import (
     AskAnswer,
     AskRequest,
@@ -19,6 +20,7 @@ from asclep_contracts import (
 )
 
 app = FastAPI(title="Asclep Resident")
+app.include_router(live_scribe_router)
 MOCK = os.getenv("RESIDENT_MOCK", "1") == "1"
 
 

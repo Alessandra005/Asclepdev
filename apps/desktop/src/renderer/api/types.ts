@@ -296,6 +296,67 @@ export interface ScribeReviewRequest {
   body?: string
 }
 
+// ---- LiveScribing: the Scribe plus the visit conversation, stored in MongoDB by the gateway.
+// SPEC-QUESTION(Ron): routes live under /patients/{id}/live-scribe-sessions (services/api/app/routes/live_scribe.py).
+export interface TranscriptSegment {
+  t: string
+  end: string
+  text: string
+}
+export interface ScribeAction {
+  id: string
+  action: string
+  times: string[]
+  why_relevant: string
+  confidence: 'low' | 'medium' | 'high'
+  source: 'visual' | 'sound' | 'conversation'
+  /** The attending's check: include this possible symptom in the scribing report. */
+  included: boolean
+}
+export interface LiveScribeWindow {
+  session_id: Uuid
+  window_start: string
+  window_end: string
+  observations: ScribeObservation[]
+  transcript: TranscriptSegment[]
+  people_in_frame: number
+  quality_flags: string[]
+}
+export type LiveScribeStatus = 'active' | 'review' | 'report_draft' | 'accepted' | 'discarded'
+export interface LiveScribeReport {
+  body: string
+  included_action_ids: string[]
+  status: 'draft' | 'final' | 'discarded'
+  drafted_by_name: string | null
+  drafted_at: IsoDateTime
+  reviewed_by_name: string | null
+  reviewed_at: IsoDateTime | null
+}
+export interface LiveScribeSessionSummary {
+  id: Uuid
+  patient_id: Uuid
+  patient: { id: Uuid; mrn: string; name: string; birth_date: string; sex: string | null }
+  consent_ref: string
+  started_by_name: string | null
+  started_at: IsoDateTime
+  ended_at: IsoDateTime | null
+  end_reason: string | null
+  status: LiveScribeStatus
+  windows_analyzed: number
+  summary: string | null
+  counts: { observations: number; transcript: number; actions: number }
+}
+export interface LiveScribeSession extends LiveScribeSessionSummary {
+  observations: ScribeObservation[]
+  transcript: TranscriptSegment[]
+  actions: ScribeAction[]
+  report: LiveScribeReport | null
+}
+export interface LiveScribeReviewRequest {
+  action: 'accept' | 'edit' | 'discard'
+  body?: string
+}
+
 // ---- Ask
 export interface AskResponse {
   answer_md: string
