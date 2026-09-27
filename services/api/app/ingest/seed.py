@@ -2,9 +2,9 @@
 import csv
 import json
 import logging
+import shutil
 import time
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from datetime import time as clock
 from pathlib import Path
 from urllib.error import URLError
@@ -20,6 +20,7 @@ from app.auth.principal import Principal
 from app.config import settings
 from app.dev_seed import GREGORY, LINDA, PRIYA, REYES
 from app.ehr.hapi import HapiAdapter
+from app.ingest import feeds
 from app.ingest.pipeline import IngestBundleRequest
 from app.ontology.api import apply_action, create_task_for_attending
 
@@ -35,8 +36,9 @@ DEFAULT_PROVIDERS = [
      "fhir_base_url": "http://ehr-b:8080/fhir", "kind": "hospital"},
 ]
 
-GOLDEN_DIR = Path("/srv/data/seed/golden")
-SLIDES_CSV = Path("/srv/data/seed/slides.csv")
+SEED_DIR = Path("/srv/data/seed")
+GOLDEN_DIR = SEED_DIR / "golden"
+SLIDES_CSV = SEED_DIR / "slides.csv"
 # Spec 17 step 4: Gregory's slide is analyzed on stage, so it gets an "analyze" task and no pre-computed finding.
 ANALYZE_LIVE = {"NSO-GH-2026-001"}
 # Spec 16: Dr. Reyes has 9 appointments today, Gregory at 10:30 and Linda at 11:15.
@@ -48,46 +50,17 @@ OTHER_SLOTS = [clock(8, 0), clock(8, 30), clock(9, 0), clock(13, 0), clock(13, 3
 # request pulls it, so the chart visibly fills in on stage. Loaded into HAPI, not ingested.
 HELD_FOR_TRANSCRIPT_DEMO = {(DEFAULT_PROVIDERS[0]["id"], "gregory-a")}
 
-MEDICATIONS = [
-    {"name": "Pembrolizumab 100 mg/4 mL", "on_hand": 0, "reorder_point": 5, "backordered": True, "restock_days": 6},
-    {"name": "Carboplatin 450 mg/45 mL", "on_hand": 14, "reorder_point": 5, "backordered": False, "restock_days": None},
-    {"name": "Pemetrexed 500 mg", "on_hand": 3, "reorder_point": 5, "backordered": False, "restock_days": 2},
-    {"name": "Albuterol inhaler", "on_hand": 40, "reorder_point": 10, "backordered": False, "restock_days": None},
-]
-
-
-def ensure_medications_and_inventory(s: Session) -> dict[str, UUID]:
-    """Seed medication + inventory_item rows. Returns name -> medication_id."""
-    ids: dict[str, UUID] = {}
-    for med in MEDICATIONS:
-        med_id = s.execute(
-            text("SELECT id FROM medication WHERE name = :name"), {"name": med["name"]}
-        ).scalar()
-        if med_id is None:
-            med_id = uuid.uuid4()
-            s.execute(
-                text("INSERT INTO medication (id, name) VALUES (:id, :name)"),
-                {"id": med_id, "name": med["name"]},
-            )
-        ids[med["name"]] = med_id
-
-        restock_at = None
-        if med["restock_days"] is not None:
-            restock_at = datetime.now(timezone.utc) + timedelta(days=med["restock_days"])
-
-        existing = s.execute(
-            text("SELECT id FROM inventory_item WHERE medication_id = :mid"), {"mid": med_id}
-        ).scalar()
-        if existing is None:
-            s.execute(
-                text("""INSERT INTO inventory_item (medication_id, on_hand, reorder_point, backordered, expected_restock_at)
-                        VALUES (:mid, :oh, :rp, :bo, :restock)"""),
-                {"mid": med_id, "oh": med["on_hand"], "rp": med["reorder_point"],
-                 "bo": med["backordered"], "restock": restock_at},
-            )
+def ensure_medications_and_inventory(s: Session) -> None:
+    """Spec 16 inventory seed, from the same CSV the live feed polls: data/seed/inventory.csv is copied to the
+    inbox once, so an edit made there for the demo survives a reseed."""
+    inbox = feeds.INBOX / "inventory.csv"
+    if not inbox.exists():
+        inbox.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(SEED_DIR / "inventory.csv", inbox)
+    feeds.sync_inventory(s, inbox)
     s.commit()
     logger.info("Medication + inventory seeds verified.")
-    return ids
+
 
 def _wait_for_hapi(base_url: str, timeout: float = 90.0) -> None:
     deadline = time.monotonic() + timeout
@@ -252,6 +225,9 @@ def seed_ingestion() -> None:
 
         seed_slides(session)
         seed_appointments(session)
+        notes = feeds.ingest_note_drops(session, SEED_DIR / "notes")  # Gregory's shadowing notes (spec 7A.3)
+        session.commit()
+        logger.info(f"Seed notes ingested: {notes}.")
 
         from app.alerts.engine import sweep_all
         raised = sweep_all(session)
