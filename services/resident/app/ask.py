@@ -6,6 +6,7 @@ every_claim_cited, numbers_grounded, no_dosing, length_limit); failing answers g
 and after LOOP_BUDGET attempts the user gets the matching records with verified=False.
 """
 import json
+import logging
 import os
 import re
 import time
@@ -25,6 +26,7 @@ from app.validate import (
 )
 from asclep_contracts import AskAnswer, AskRequest, Citation
 
+log = logging.getLogger("uvicorn.error")
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://api:8000/api/v1").rstrip("/")
 MAX_TOOL_CALLS = 6
 TIME_BUDGET_S = 30.0
@@ -127,8 +129,13 @@ def run_tool(name: str, args: dict, token: str | None, seen: dict) -> tuple[str,
 def check(answer: str, seen: dict, sources: str) -> list[str]:
     names = {w.lower() for _, label in seen.values() if label for w in re.findall(r"[A-Za-z]{4,}", label)}
     names -= {"inventory", "finding", "note", "patient"}  # generic type words from labels are not record content
-    return (citations_well_formed(answer) + citations_resolve(answer, set(seen)) + every_claim_cited(answer, names)
-            + numbers_grounded(answer, sources) + no_dosing(answer) + length_limit(answer))
+    checks = {"citations_well_formed": citations_well_formed(answer), "citations_resolve": citations_resolve(answer, set(seen)),
+              "every_claim_cited": every_claim_cited(answer, names), "numbers_grounded": numbers_grounded(answer, sources),
+              "no_dosing": no_dosing(answer), "length_limit": length_limit(answer)}
+    failed = [k for k, v in checks.items() if v]
+    if failed:  # check names only: answer text is PHI and never logged
+        log.info("ask: attempt failed %s", failed)
+    return [p for v in checks.values() for p in v]
 
 
 def retype(answer: str, seen: dict) -> str:
@@ -177,7 +184,8 @@ def answer(req: AskRequest, token: str | None) -> AskAnswer:
                 model=llm.MODEL, max_tokens=4000, system=SYSTEM, tools=TOOLS, messages=messages,
                 tool_choice={"type": "auto" if calls < MAX_TOOL_CALLS else "none"},
                 output_config={"effort": "low"})
-        except Exception:  # API down or out of time: fall back to the records gathered so far
+        except Exception as exc:  # API down or out of time: fall back to the records gathered so far
+            log.warning("ask: Claude call failed (%s)", type(exc).__name__)
             break
         messages.append({"role": "assistant", "content": msg.content})
         uses = [b for b in msg.content if b.type == "tool_use"]
