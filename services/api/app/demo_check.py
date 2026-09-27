@@ -51,9 +51,11 @@ def check_gregory_ask() -> tuple[bool, str]:
                    json={"question": GREGORY_QUESTION, "patient_id": GREGORY}, timeout=120)
     if r.status_code != 200:
         return False, f"/ask returned {r.status_code}"
+    # Spec 18.5: the answer must cite the inventory row. The Finding exists only after demo step 4's Analyze,
+    # so before the demo the answer correctly says no biopsy finding is recorded yet.
     kinds = {c.get("kind") for c in r.json().get("citations", [])}
-    ok = {"finding", "inventory"} <= kinds
-    return ok, "cites the finding and the inventory row" if ok else f"citation kinds: {sorted(kinds) or 'none'}"
+    ok = "inventory" in kinds
+    return ok, f"cites the inventory row (kinds: {sorted(kinds)})" if ok else f"citation kinds: {sorted(kinds) or 'none'}"
 
 
 def check_wu_denied() -> tuple[bool, str]:
