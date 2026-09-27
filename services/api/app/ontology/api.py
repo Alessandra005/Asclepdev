@@ -220,7 +220,80 @@ def context_view(s: Session, p: Principal, view: str, subject_id: UUID) -> Conte
 
 
 def facts(s: Session, p: Principal, patient_id: UUID, fact_set: str) -> dict:
-    raise NotImplementedError("Alessandra: spec 7A.7 level 1 SQL facts — needs fact_set definitions")
+    """Return deterministic Level 1 facts for a patient."""
+    if fact_set == "key_labs":
+        groups = _CODE_GROUPS.get("renal_function", {})
+        key_codes = [
+            code
+            for codes in groups.values()
+            for code in codes
+        ]
+
+        if not key_codes:
+            return {"key_labs": []}
+
+        query = text(
+            """
+            WITH ranked AS (
+                SELECT
+                    loinc_code,
+                    display,
+                    value_norm,
+                    unit_norm,
+                    interpretation,
+                    effective_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY loinc_code
+                        ORDER BY effective_at DESC
+                    ) AS rn
+                FROM observation
+                WHERE patient_id = :patient_id
+                  AND record_status = 'current'
+                  AND loinc_code = ANY(:key_codes)
+                  AND value_norm IS NOT NULL
+            )
+            SELECT
+                cur.loinc_code AS code,
+                cur.display,
+                cur.value_norm AS latest,
+                cur.unit_norm AS unit,
+                cur.interpretation,
+                cur.effective_at,
+                CASE
+                    WHEN prev.value_norm IS NULL THEN 'none'
+                    WHEN cur.value_norm > prev.value_norm * 1.05 THEN 'rising'
+                    WHEN cur.value_norm < prev.value_norm * 0.95 THEN 'falling'
+                    ELSE 'stable'
+                END AS trend,
+                CASE
+                    WHEN cur.interpretation IS NULL THEN false
+                    WHEN cur.interpretation <> 'N' THEN true
+                    ELSE false
+                END AS abnormal
+            FROM ranked cur
+            LEFT JOIN ranked prev
+                ON prev.loinc_code = cur.loinc_code
+               AND prev.rn = 2
+            WHERE cur.rn = 1
+            ORDER BY cur.loinc_code
+            """
+        )
+
+        rows = s.execute(
+            query,
+            {
+                "patient_id": patient_id,
+                "key_codes": key_codes,
+            },
+        ).mappings().all()
+
+        return {
+            "key_labs": [dict(row) for row in rows],
+        }
+
+    raise NotImplementedError(
+        f"Unknown fact set: {fact_set}"
+    )
 
 
 def search(s: Session, p: Principal, query: str, patient_id: UUID | None, k: int = 8) -> list[dict]:

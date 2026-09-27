@@ -137,6 +137,24 @@ def _record_version(s: Session, object_type: str, object_id: UUID, data: dict, r
         {"t": object_type, "i": object_id, "v": version, "d": json.dumps(data), "r": raw_record_id},
     )
 
+def _normalize_lab_value(
+    loinc_code: str | None,
+    value_num: float | None,
+    unit: str | None,
+) -> tuple[float | None, str | None]:
+    """Normalize a numeric lab value for deterministic facts.
+
+    The current spec does not define the full conversion table, so values
+    with known source units are preserved until an explicit conversion rule
+    exists. Unknown/missing units are also preserved rather than guessed.
+    """
+    if value_num is None:
+        return None, unit
+
+    if unit:
+        return float(value_num), unit
+
+    return float(value_num), None
 
 def _process_observation(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
     code = (resource.get("code", {}).get("coding") or [{}])[0]
@@ -153,14 +171,22 @@ def _process_observation(s: Session, patient_id: UUID, resource: dict, source_sy
         value_text = resource["valueCodeableConcept"].get("text") or (resource["valueCodeableConcept"].get("coding") or [{}])[0].get("display")
 
     ref_range = (resource.get("referenceRange") or [{}])[0]
+    value_norm, unit_norm = _normalize_lab_value(
+        code.get("code"),
+        value_num,
+        unit,
+    )
 
     obs_id = uuid4()
     s.execute(
         text("""INSERT INTO observation (id, patient_id, category,
-                loinc_code, display, value_num, value_text, unit, ref_low, ref_high,
-                interpretation, source_system, source_ref, effective_at)
-                VALUES (:id, :pid, :cat, :code, :disp, :vnum, :vtext, :unit, :lo, :hi,
-                :interp, :src, :ref, :eff)"""),
+                loinc_code, display, value_num, value_text, unit,
+                ref_low, ref_high, interpretation,
+                source_system, source_ref, effective_at,
+                value_norm, unit_norm)
+                VALUES (:id, :pid, :cat, :code, :disp, :vnum, :vtext, :unit,
+                :lo, :hi, :interp, :src, :ref, :eff,
+                :vnorm, :unorm)"""),
         {"id": obs_id, "pid": patient_id,
          "cat": (resource.get("category") or [{}])[0].get("coding", [{}])[0].get("code", "unknown"),
          "code": code.get("code"), 
@@ -168,6 +194,7 @@ def _process_observation(s: Session, patient_id: UUID, resource: dict, source_sy
          "vnum": value_num, "vtext": value_text, "unit": unit,
          "lo": ref_range.get("low", {}).get("value"), "hi": ref_range.get("high", {}).get("value"),
          "interp": (resource.get("interpretation") or [{}])[0].get("coding", [{}])[0].get("code"),
+         "vnorm": value_norm, "unorm": unit_norm,
          "src": source_system, "ref": resource.get("id"), "eff": resource.get("effectiveDateTime")},
     )
     _record_version(s, "Observation", obs_id, resource, raw_record_id)
