@@ -304,4 +304,10 @@ def apply_action(s: Session, p: Principal, action: str, payload: BaseModel) -> d
     if action == "ingest_bundle":
         from app.ingest.pipeline import ingest_bundle
         return ingest_bundle(s, p, payload)
+    if action == "request_transcript":
+        from app.ingest.transcript import request_transcript
+        return request_transcript(s, p, payload)
+    if action == "merge_transcript":
+        from app.ingest.transcript import merge_transcript
+        return merge_transcript(s, p, payload)
     raise NotImplementedError(f"Alessandra: action '{action}' not implemented yet")

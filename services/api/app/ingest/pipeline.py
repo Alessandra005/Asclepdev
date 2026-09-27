@@ -332,7 +332,7 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
 def ingest_bundle(s: Session, p: Principal, payload: IngestBundleRequest) -> dict:
     """Entry point called from ontology.apply_action('ingest_bundle', ...)."""
     provider = s.execute(
-        text("SELECT fhir_base_url, kind FROM provider WHERE id = :id"),
+        text("SELECT fhir_base_url, name, kind FROM provider WHERE id = :id"),
         {"id": payload.provider_id},
     ).mappings().first()
     if not provider:
@@ -341,7 +341,7 @@ def ingest_bundle(s: Session, p: Principal, payload: IngestBundleRequest) -> dic
     adapter = HapiAdapter(provider_id=payload.provider_id, base_url=provider["fhir_base_url"])
     bundle = adapter.fetch_everything(payload.fhir_patient_id)
 
-    source_system = provider.get("name") or provider["kind"] 
+    source_system = provider.get("name") or provider["kind"]
 
     landed_ids = land_bundle(s, source_system, bundle)
     counts = process_raw_records(s, source_system, landed_ids)
