@@ -198,3 +198,12 @@ def test_tool_calls_send_user_token_and_resident_actor(monkeypatch):
     ask.call_gateway("get_inventory", {"medication_name": "pembrolizumab"}, "Bearer u")
     assert sent["url"].endswith("/inventory") and sent["params"] == {"q": "pembrolizumab"}
     assert sent["headers"] == {"X-Actor-Kind": "resident", "Authorization": "Bearer u"}
+
+
+def test_search_results_are_citable_by_type_and_id():
+    note = str(uuid4())
+    seen = {}
+    ask.collect({"items": [{"citation": {"id": f"Note:{note}", "kind": "note", "label": "CT chest note",
+                                         "object_id": note}, "text": "chest x-ray ...", "score": 0.82}],
+                 "next_cursor": None}, "Chunk", seen)
+    assert seen == {note: ("Note", "CT chest note")}
