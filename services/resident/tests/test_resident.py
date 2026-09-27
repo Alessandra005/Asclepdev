@@ -212,3 +212,14 @@ def test_search_results_are_citable_by_type_and_id():
                                          "object_id": note}, "text": "chest x-ray ...", "score": 0.82}],
                  "next_cursor": None}, "Chunk", seen)
     assert seen == {note: ("Note", "CT chest note")}
+
+
+def test_uncited_remarks_are_dropped_when_repairs_run_out(claude, gateway):
+    remark = f"{GOOD} Pembrolizumab could be ordered from another supplier."  # uncited record fact, 3 times
+    fake = claude([reply(tool_use("get_inventory", medication_name="pembrolizumab")),
+                   reply(tool_use("get_findings", patient_id=GREGORY)), final(remark), final(remark), final(remark)])
+    a = ask.answer(AskRequest(question=QUESTION), "Bearer t")
+    assert a.verified and "another supplier" not in a.answer_md
+    assert {c.object_type for c in a.citations} == {"Finding", "InventoryItem"}
+    tool_result = fake.requests[1]["messages"][-1]["content"][0]["content"]
+    assert f'"cite": "[[obj:InventoryItem:{INVENTORY}]]"' in tool_result  # the exact token to copy

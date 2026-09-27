@@ -22,7 +22,9 @@ Rules:
   {{FINDING.LABEL}}, {{FINDING.CONFIDENCE}}, {{FINDING.MODEL}}, {{FINDING.SCORES}}.
 - Copy numbers exactly as they appear in the records; never compute new ones.
 - context: 3 to 6 bullets of the patient context most relevant to this finding.
-- conflicts: records that disagree or are missing (e.g. no prior imaging on file); cite what you can.
+- conflicts: records that disagree between sources, a record one source has that another lacks (a record
+  marked "Source conflict", or an allergy recorded by only one provider), and data that is truly absent (e.g.
+  no prior imaging on file). Cite the records involved. Never call a record empty when its text has content.
 - considerations: general next steps phrased as considerations (e.g. molecular testing is commonly
   considered). No doses, routes, frequencies, or definitive treatment plans. No citations needed.
 - Short plain sentences."""

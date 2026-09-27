@@ -19,6 +19,7 @@ from app.validate import (
     CITE,
     citations_resolve,
     citations_well_formed,
+    drop_uncited,
     every_claim_cited,
     length_limit,
     no_dosing,
@@ -42,6 +43,8 @@ SYSTEM = """You are the Resident in Asclep, answering a clinician's question fro
 - Keep answers under 150 words unless asked for more.
 - Copy numbers exactly as the tools return them; never compute new ones (no "in N days"). Write dates as
   YYYY-MM-DD.
+- Every record in the tool results has a "cite" field: end each sentence that states a record fact with that
+  exact token, copied character for character.
 - Plain sentences, each ending with its citation. Only state what the records show or what is missing; no
   offers, advice, or remarks about yourself. Never write a citation for a record you don't have."""
 
@@ -101,6 +104,7 @@ def collect(data: object, default_type: str, seen: dict[str, tuple[str, str | No
         if re.fullmatch(r"[0-9a-fA-F-]{36}", rid):
             t = rtype or data.get("object_type") or type_ or default_type
             seen[rid.lower()] = (t, next((str(data[k]) for k in LABEL_KEYS if data.get(k)), None))
+            data["cite"] = f"[[obj:{t}:{rid}]]"  # the exact token to copy: the model never builds ids or types
         for k, v in data.items():
             if isinstance(v, (list, dict)):
                 collect(v, default_type, seen, KEY_TYPES.get(k, type_))
@@ -126,16 +130,28 @@ def run_tool(name: str, args: dict, token: str | None, seen: dict) -> tuple[str,
     return json.dumps(data, default=str)[:MAX_RESULT_CHARS], False
 
 
-def check(answer: str, seen: dict, sources: str) -> list[str]:
+SALVAGEABLE = {"citations_well_formed", "every_claim_cited"}  # failures drop_uncited() can repair without the model
+
+
+def names_in(seen: dict) -> set[str]:
+    """Words of record labels (patient, medication, ...): an uncited sentence using one states a record fact."""
     names = {w.lower() for _, label in seen.values() if label for w in re.findall(r"[A-Za-z]{4,}", label)}
-    names -= {"inventory", "finding", "note", "patient"}  # generic type words from labels are not record content
-    checks = {"citations_well_formed": citations_well_formed(answer), "citations_resolve": citations_resolve(answer, set(seen)),
-              "every_claim_cited": every_claim_cited(answer, names), "numbers_grounded": numbers_grounded(answer, sources),
+    return names - {"inventory", "finding", "note", "patient"}  # generic type words are not record content
+
+
+def check(answer: str, seen: dict, sources: str) -> dict[str, list[str]]:
+    """Failed checks by name -> problems. Only the names are ever logged: answer text is PHI."""
+    checks = {"citations_well_formed": citations_well_formed(answer),
+              "citations_resolve": citations_resolve(answer, set(seen)),
+              "every_claim_cited": every_claim_cited(answer, names_in(seen)),
+              "numbers_grounded": numbers_grounded(answer, sources),
               "no_dosing": no_dosing(answer), "length_limit": length_limit(answer)}
-    failed = [k for k, v in checks.items() if v]
-    if failed:  # check names only: answer text is PHI and never logged
-        log.info("ask: attempt failed %s", failed)
-    return [p for v in checks.values() for p in v]
+    return {k: v for k, v in checks.items() if v}
+
+
+def verified(text: str, seen: dict, conversation_id: str) -> AskAnswer:
+    text = retype(text, seen)
+    return AskAnswer(answer_md=text, citations=citations(text, seen), conversation_id=conversation_id)
 
 
 def retype(answer: str, seen: dict) -> str:
@@ -177,7 +193,7 @@ def answer(req: AskRequest, token: str | None) -> AskAnswer:
     question = req.question + (f"\n\n(The user has patient {req.patient_id} open.)" if req.patient_id else "")
     messages: list[dict] = [{"role": "user", "content": question}]
     seen: dict[str, tuple[str, str | None]] = {}
-    sources, calls, attempts = "", 0, 0
+    sources, calls, attempts, last = "", 0, 0, None
     while attempts < llm.LOOP_BUDGET and (left := deadline - time.monotonic()) > 1:
         try:
             msg = llm.client().with_options(timeout=left, max_retries=0).messages.create(
@@ -203,11 +219,18 @@ def answer(req: AskRequest, token: str | None) -> AskAnswer:
             continue
         attempts += 1
         text = text_of(msg)
-        problems = check(text, seen, sources) if text else ["The answer was empty."]
-        if not problems:
-            text = retype(text, seen)
-            return AskAnswer(answer_md=text, citations=citations(text, seen), conversation_id=conversation_id)
+        failed = check(text, seen, sources) if text else {"empty": ["The answer was empty."]}
+        if not failed:
+            return verified(text, seen, conversation_id)
+        log.info("ask: attempt %d failed %s", attempts, sorted(failed))
+        last = (text, failed)
         messages.append({"role": "user", "content": "Your answer failed these checks. Rewrite it, fixing every "
-                         "one, without calling more tools:\n" + "\n".join(f"- {p}" for p in problems)})
+                         "one, without calling more tools:\n" + "\n".join(f"- {p}" for v in failed.values() for p in v)})
         calls = MAX_TOOL_CALLS  # repairs are rewrites, not new lookups
+    if last and set(last[1]) <= SALVAGEABLE:  # only citation problems left: remove the uncited sentences
+        fixed = drop_uncited(last[0], names_in(seen))
+        if CITE.search(fixed) and not check(fixed, seen, sources):
+            log.info("ask: salvaged by dropping uncited sentences")
+            return verified(fixed, seen, conversation_id)
+    log.info("ask: fallback (attempts=%d, time_left=%.1fs)", attempts, deadline - time.monotonic())
     return fallback(req, seen, conversation_id)

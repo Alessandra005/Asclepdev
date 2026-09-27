@@ -90,6 +90,17 @@ def every_claim_cited(text: str, names: set[str] = frozenset()) -> list[str]:
     return [f"Cite this sentence with [[obj:type:id]] or remove it: \"{s[:80]}\"" for s in bad]
 
 
+def drop_uncited(text: str, names: set[str] = frozenset()) -> str:
+    """Deterministic repair (spec 10.1: "uncited clinical sentences are removed"): drop malformed citation tokens,
+    then every sentence that states a record fact without a citation. Never adds text."""
+    text = re.sub(r"\s*\[\[obj:[^\]]*\]\]", lambda m: m[0] if CITE.fullmatch(m[0].strip()) else "", text)
+    for s in re.split(r"(?<=[.!?])\s+|\n+", text):
+        core = s.strip().lstrip("-*0123456789. ").strip()
+        if core and not CITE.search(core) and not NOTHING_TO_CITE.search(core) and is_claim(core, names):
+            text = text.replace(s, "")
+    return re.sub(r"\n\s*[-*]\s*(?=\n|$)", "", re.sub(r"[ \t]+\n", "\n", text)).strip()
+
+
 def citations_well_formed(text: str) -> list[str]:
     """Every [[obj:...]] token is [[obj:Type:<uuid>]]; a made-up id like 'none' is not a citation."""
     bad = [t for t in re.findall(r"\[\[obj:[^\]]*\]\]", text) if not CITE.fullmatch(t)]
@@ -113,4 +124,8 @@ if __name__ == "__main__":
     assert locked_values_intact("confidence 91%", "LUAD", scores)
     assert no_dosing("Pembrolizumab 100 mg/4 mL is backordered") == []
     assert no_dosing("give 200 mg every 3 weeks")
+    oid = "0135214a-d303-4261-88a5-2e057af2c2cd"
+    fixed = drop_uncited(f"No biopsy finding is on file [[obj:Finding:none]]. Pembrolizumab is backordered "
+                         f"[[obj:InventoryItem:{oid}]]. An order is possible, but pembrolizumab is out of stock.")
+    assert fixed == f"No biopsy finding is on file. Pembrolizumab is backordered [[obj:InventoryItem:{oid}]].", fixed
     print("ok")
