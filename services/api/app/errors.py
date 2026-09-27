@@ -7,7 +7,6 @@ STATUS = {
     "UNAUTHENTICATED": 401,
     "FORBIDDEN_ROLE": 403,
     "FORBIDDEN_NOT_ON_CARE_TEAM": 403,
-    "FORBIDDEN": 403,  # generic denial used by ontology-layer PermissionErrors
     "NOT_FOUND": 404,
     "CONFLICT": 409,
     "VALIDATION_ERROR": 422,
