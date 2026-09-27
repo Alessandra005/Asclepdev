@@ -45,10 +45,10 @@ def _rid(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
-def _post(url: str, payload: dict, model: type[BaseModel], what: str) -> BaseModel:
+def _post(url: str, payload: dict, model: type[BaseModel], what: str, headers: dict | None = None) -> BaseModel:
     """Call an internal service; a network error or an off-contract reply is UPSTREAM_UNAVAILABLE (spec 10.4)."""
     try:
-        r = httpx.post(url, json=payload, timeout=UPSTREAM_TIMEOUT)
+        r = httpx.post(url, json=payload, headers=headers, timeout=UPSTREAM_TIMEOUT)
         r.raise_for_status()
         return model.model_validate(r.json())
     except (httpx.HTTPError, ValidationError, ValueError) as exc:

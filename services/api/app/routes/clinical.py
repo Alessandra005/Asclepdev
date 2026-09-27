@@ -5,15 +5,20 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import text
 
+from app.audit.log import write_audit
 from app.auth.principal import Principal
+from app.config import settings
 from app.db import get_session
 from app.errors import AsclepError
 from app.ontology import api as ontology
 from app.ontology import shapes
 from app.rbac.permissions import scope_for
-from app.rbac.require import check_patient, require
+from app.rbac.require import check_patient, relationship, require
+from app.routes.lab import CITE, RAN_ON, _post
+from asclep_contracts import AskAnswer, AskRequest
 
 router = APIRouter(tags=["clinical"])
 
@@ -85,6 +90,58 @@ def source_record(citation_id: str, request: Request,
     recorded = row.get("effective_at") or row.get("created_at") or row.get("ingested_at") or row.get("updated_at")
     return {"citation": shapes.citation(type_, row), "title": shapes.title(type_, row),
             "body": shapes.body(type_, row), "recorded_at": recorded}
+
+
+def _can_read(s, p: Principal, type_: str, row: dict) -> bool:
+    """check_patient's rule without raising or a deny row: filtering an AI answer is not an access attempt."""
+    scope = scope_for(READ_PERMISSION[type_], p.role)
+    patient_id = row.get("patient_id") or (row["id"] if type_ == "Patient" else None)
+    if scope is None or (patient_id is None and scope != "all"):
+        return False
+    if patient_id is not None:
+        if scope in ("own", "specimen_only"):
+            return False  # conservative: these scopes never see citable clinical rows here
+        rel = relationship(s, p.user_id, patient_id)
+        if (scope in ("care_team", "attending") and rel is None) or (scope == "attending" and rel != "attending"):
+            return False
+    return row.get("sensitivity") != "restricted" or ontology.can_see_restricted(s, p, patient_id)
+
+
+def _cited(s, p: Principal, cid: str, patient_id: UUID | None) -> dict | None:
+    """shapes.citation for 'Type:uuid' if the record exists, is this patient's, and the user may open it."""
+    type_, _, raw_id = cid.partition(":")
+    if type_ not in READ_PERMISSION:
+        return None
+    try:
+        row = ontology.peek(s, type_, UUID(raw_id))
+    except (ValueError, LookupError):
+        return None
+    if patient_id is not None and row.get("patient_id") not in (patient_id, None):
+        return None  # spec 10.1: a citation must belong to this patient
+    return shapes.citation(type_, row) if _can_read(s, p, type_, row) else None
+
+
+class AskBody(BaseModel):
+    question: str
+    patient_id: UUID | None = None
+    conversation_id: str | None = None
+
+
+@router.post("/ask")
+def ask(body: AskBody, request: Request, p: Principal = Depends(require("use_ask")), s=Depends(get_session)):
+    """The Resident answers with the user's own token, so its tool reads are RBAC-checked and audited (spec 10.2).
+    Every [[obj:Type:uuid]] token left in answer_md has a citations[] entry the user can open; the rest are cut."""
+    if not body.question.strip():
+        raise AsclepError("VALIDATION_ERROR", "Type a question.")
+    answer = _post(f"{settings.resident_url}/ask", AskRequest(**body.model_dump()).model_dump(mode="json"),
+                   AskAnswer, "Resident", headers={"Authorization": request.headers["authorization"]})
+    ids = [f"{t}:{i}" for t, i in CITE.findall(answer.answer_md)] + [f"{c.object_type}:{c.id}" for c in answer.citations]
+    cited = {cid: c for cid in dict.fromkeys(ids) if (c := _cited(s, p, cid, body.patient_id))}
+    text_ = CITE.sub(lambda m: m.group(0) if f"{m.group(1)}:{m.group(2)}" in cited else "", answer.answer_md)
+    write_audit(s, p, "create", "AskAnswer", patient_id=body.patient_id, request_id=_rid(request), ai="resident",
+                ran_on=RAN_ON)
+    return {"answer_md": text_, "citations": list(cited.values()), "conversation_id": answer.conversation_id,
+            "verified": answer.verified}
 
 
 @router.get("/files/{path:path}")
