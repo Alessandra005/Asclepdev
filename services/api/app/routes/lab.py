@@ -71,6 +71,21 @@ def list_findings(patient_id: UUID,
     return {"items": [shapes.finding(s, r) for r in rows], "next_cursor": None}
 
 
+@router.get("/patients/{patient_id}/slides")
+def list_slides(patient_id: UUID,
+                p: Principal = Depends(require("view_labs", patient_param="patient_id", object_type="Slide")),
+                s=Depends(get_session)):
+    """Slides with their latest finding (null until analyzed), so the Lab tab can offer Analyze (spec 17 step 4)."""
+    rows = s.execute(text("""
+        SELECT sl.id, sl.specimen_id, sl.uploaded_at, sp.site, sp.accession,
+               (SELECT f.id FROM finding f WHERE f.slide_id = sl.id ORDER BY f.created_at DESC LIMIT 1) AS finding_id
+        FROM slide sl JOIN specimen sp ON sp.id = sl.specimen_id
+        WHERE sp.patient_id = :pid ORDER BY sl.uploaded_at DESC"""), {"pid": patient_id}).mappings().all()
+    return {"items": [{"id": r["id"], "specimen_id": r["specimen_id"], "uploaded_at": r["uploaded_at"],
+                       "specimen_label": " · ".join(x for x in (r["site"], r["accession"]) if x) or "Specimen",
+                       "finding_id": r["finding_id"]} for r in rows], "next_cursor": None}
+
+
 @router.post("/patients/{patient_id}/specimens/{specimen_id}/slides")
 def upload_slide(patient_id: UUID, specimen_id: UUID, request: Request, file: UploadFile = File(...),
                  p: Principal = Depends(require("run_lab_technician", patient_param="patient_id",

@@ -26,3 +26,8 @@ def test_me_lists_permissions(client, fake_session):
     assert r.status_code == 200
     assert "start_scribe" in r.json()["permissions"]
     assert "review_findings" not in r.json()["permissions"]
+
+
+def test_slides_need_care_team(client, fake_session):
+    r = client.get(f"/api/v1/patients/{PID}/slides", headers=token("physician"))
+    assert r.status_code == 403 and r.json()["error"]["code"] == "FORBIDDEN_NOT_ON_CARE_TEAM"
