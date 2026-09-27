@@ -16,10 +16,11 @@ def run_synthea(synthea_jar: Path, output_dir: Path, patients: int = PATIENTS_PE
     """Generate FHIR R4 bundles with Synthea's default modules."""
     output_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["java", "-jar", str(synthea_jar), "-s", str(SEED), "-p", str(patients),
+       ["java", "-jar", str(synthea_jar), "-s", str(SEED), "-p", str(patients),
+        "-a", "0-85",
         "--exporter.fhir.export=true",
         f"--exporter.baseDirectory={output_dir}"],
-        check=True,
+       check=True,
     )
 
 
@@ -39,7 +40,7 @@ def transaction_bundle(bundle: dict) -> dict:
     return {"resourceType": "Bundle", "type": "transaction", "entry": entries}
 
 
-def post_bundle(bundle: dict, fhir_base_url: str, timeout: float = 120.0) -> None:
+def post_bundle(bundle: dict, fhir_base_url: str, timeout: float = 300.0) -> None:
     """POST one transaction bundle to HAPI's transaction endpoint."""
     request = Request(
         f"{fhir_base_url.rstrip('/')}/",
@@ -59,6 +60,7 @@ def load_directory(bundle_dir: Path, fhir_base_url: str) -> int:
     rest = [f for f in all_files if f not in priority]
     count = 0
     for bundle_path in priority + rest:
+        print(f"Loading {bundle_path.name}...")
         with bundle_path.open(encoding="utf-8") as bundle_file:
             try:
                 post_bundle(json.load(bundle_file), fhir_base_url)
