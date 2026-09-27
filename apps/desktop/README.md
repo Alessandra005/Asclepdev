@@ -44,7 +44,9 @@ you pick **This computer** or the host comes back.
 - **Tunnel link (only the host installs anything):** `winget install Cloudflare.cloudflared`, then,
   while `pnpm demo:host` runs, `cloudflared tunnel --url http://localhost:8787`. Share the
   `https://....trycloudflare.com` link it prints; teammates paste the whole link as the host
-  address. Anyone with the link can reach the demo (synthetic data only), so share it privately.
+  address. A brand-new link can take a minute to start working: if Connect says no server answered,
+  wait and click Connect again. Anyone with the link can reach the demo (synthetic data only), so
+  share it privately.
 - **Shared VPN:** everyone joins the same Tailscale tailnet (or Radmin VPN network) and enters the
   host's VPN address, e.g. `100.x.y.z`.
 

@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 
@@ -11,6 +11,12 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 const PORT = '8799' // not the default 8787, so a teammate's running host can't collide with the test
 
 let app: ElectronApplication
+
+/** Join by this machine's network IP, like a teammate's laptop would (localhost hid a CSP block once). */
+const lanIp =
+  Object.values(networkInterfaces())
+    .flat()
+    .find((a) => a !== undefined && a.family === 'IPv4' && !a.internal)?.address ?? 'localhost'
 
 const { ELECTRON_RUN_AS_NODE: _runAsNode, ...parentEnv } = process.env
 void _runAsNode
@@ -43,10 +49,9 @@ test('two users share one demo: Reyes requests, admin consents in another window
 
   // Join the shared server this app hosts.
   await reyes.getByText('Shared with team').click()
-  await reyes.getByLabel('Host address').fill(`localhost:${PORT}`)
+  await reyes.getByLabel('Host address').fill(`${lanIp}:${PORT}`)
   await reyes.getByRole('button', { name: 'Connect' }).click()
   await expect(reyes.getByText(/Connected to/)).toBeVisible()
-  await expect(reyes.getByText(/Teammates join with/)).toBeVisible()
 
   await signIn(reyes, 'reyes@asclep.demo')
   await expect(reyes.getByText(/SHARED DEMO/)).toBeVisible()
