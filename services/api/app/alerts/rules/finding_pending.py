@@ -1,7 +1,9 @@
 """FINDING_PENDING (spec §12): new Finding with status pending_review -> warning,
 goes to attending."""
 from uuid import UUID
+
 from sqlalchemy.orm import Session
+
 from app.alerts.engine import AlertDraft, _attending_for
 
 

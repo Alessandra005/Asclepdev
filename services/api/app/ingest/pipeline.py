@@ -7,16 +7,16 @@ Two stages:
 """
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.alerts.engine import evaluate_object
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
-from app.alerts.engine import evaluate_object
 
 # Only these resource types are mapped into clinical tables today. Everything else
 # still lands in raw_record for history/audit, but isn't surfaced through ontology yet. 
@@ -168,7 +168,8 @@ def _process_observation(s: Session, patient_id: UUID, resource: dict, source_sy
         value_text = resource["valueString"]
     elif "valueCodeableConcept" in resource:
         # Extra safety check if smoking status is stored as a concept string
-        value_text = resource["valueCodeableConcept"].get("text") or (resource["valueCodeableConcept"].get("coding") or [{}])[0].get("display")
+        concept = resource["valueCodeableConcept"]
+        value_text = concept.get("text") or (concept.get("coding") or [{}])[0].get("display")
 
     ref_range = (resource.get("referenceRange") or [{}])[0]
     value_norm, unit_norm = _normalize_lab_value(

@@ -1,7 +1,9 @@
 """CRITICAL_LAB (spec §12): Observation with interpretation HH or LL -> critical,
 goes to patient's attending + nurses on care team."""
 from uuid import UUID
+
 from sqlalchemy.orm import Session
+
 from app.alerts.engine import AlertDraft, _attending_and_nurses_for
 
 

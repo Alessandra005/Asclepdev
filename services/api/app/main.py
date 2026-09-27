@@ -5,11 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.errors import install_error_handlers
+from app.routes.alerts import router as alerts_router
 from app.routes.health import router as health_router
 from app.routes.live_scribe import router as live_scribe_router
 from app.routes.patients import router as patients_router
-
-from app.routes.alerts import router as alerts_router
 
 app = FastAPI(title="Asclep Gateway", version="0.1.0")
 install_error_handlers(app)

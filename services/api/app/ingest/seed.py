@@ -2,20 +2,20 @@
 import json
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 from uuid import UUID
-import uuid
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
-from app.ontology.api import apply_action
 from app.ingest.pipeline import IngestBundleRequest
+from app.ontology.api import apply_action
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ingest.seed")

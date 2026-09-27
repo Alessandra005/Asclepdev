@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.audit.log import write_audit
 from app.auth.principal import Principal
 from app.rbac.permissions import scope_for
-from asclep_contracts import ContextView, ContextItem
+from asclep_contracts import ContextItem, ContextView
 from asclep_contracts.ontology import SubjectRef
 
 _REGISTRY = yaml.safe_load((Path(__file__).parent / "registry.yaml").read_text())

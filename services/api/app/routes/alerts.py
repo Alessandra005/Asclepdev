@@ -1,10 +1,10 @@
 """Alert routes (spec section 12, 15)."""
 from fastapi import APIRouter, Depends
+from sqlalchemy import text
 
 from app.auth.principal import Principal
 from app.db import get_session
 from app.rbac.require import require
-from sqlalchemy import text
 
 router = APIRouter(tags=["alerts"])
 
