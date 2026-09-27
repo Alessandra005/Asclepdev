@@ -195,6 +195,34 @@ export interface MedicationRequest {
   provenance: Provenance
 }
 
+// ---- Transcript requests (spec 11 state machine, transcript_request DDL)
+export type TranscriptStatus = 'requested' | 'consented' | 'fetched' | 'merged' | 'denied'
+export interface TranscriptRequest {
+  id: Uuid
+  patient_id: Uuid
+  /** Display name of the source provider. The DDL stores from_provider_id; the UI needs the name joined. */
+  from_provider: string
+  status: TranscriptStatus
+  consent_ref: string | null
+  resources_imported: number
+  created_at: IsoDateTime
+  completed_at: IsoDateTime | null
+}
+/**
+ * One row of the admin consent queue (spec 11 step 2: "a task for the admin").
+ * SPEC-QUESTION: no spec route lists these yet; shape proposed in docs/BACKEND_HANDOFF.md.
+ */
+export interface ConsentTask extends TranscriptRequest {
+  patient_name: string
+  patient_mrn: string
+  requested_by_name: string
+}
+/** POST /transcripts/{id}/consent body (spec 15). */
+export interface ConsentDecision {
+  consent_ref: string
+  granted: boolean
+}
+
 // ---- Citations (SPEC-QUESTION: public source-detail route not defined; see CLAUDE.md)
 export type CitationKind =
   'observation' | 'note' | 'condition' | 'medication' | 'finding' | 'inventory' | 'scribe'

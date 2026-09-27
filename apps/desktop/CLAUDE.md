@@ -53,6 +53,11 @@ Mock mode needs no backend. Demo users all use password `asclep-demo`: reyes (at
 (nurse), wu (not on Gregory's team), lab, admin. In DevTools, `__asclepMock.failNext = true` makes
 the next request fail, which is useful for rehearsing error states.
 
+One-window mock demo (step 3): mock state lives in memory and survives sign-out (only the session, UI
+state and query cache reset), so one window can play both roles. As Dr. Reyes click Request records,
+then sign out → sign in as admin → Admin tab → Review → consent reference → Record consent → sign
+out → sign in as reyes → Ctrl+K Gregory. The mock merges about 3.5 s after consent.
+
 ## Layout
 
 ```
@@ -68,7 +73,7 @@ src/renderer/
                              SourceDrawer, AiDraftBlock, ReviewPanel, LocalProcessingPill,
                              QueryState (loading/empty/error), RelativeTime, RequirePatient
   tabs/                      login, dashboard, patient (+ ScribePanel, useScribeCapture), lab, ask,
-                             audit, records (stub), admin (stub)
+                             audit, records, admin (consent queue)
 ```
 
 ## What works now (verified with a Playwright walk of the demo path, no console errors)
@@ -76,8 +81,9 @@ src/renderer/
 1. Login (role-specific landing) → Dashboard (attention strip, schedule, tasks, recent, supply watch)
 2. Gregory → Lab → Analyze → unverified finding (LUAD, 87%) + Resident report with citation chips
 3. Citation chip → SourceDrawer with provenance → Confirm → green "Confirmed by Dr. Maya Reyes"
-4. Patient → Request records → polls until merged → penicillin allergy tag, Riverside source,
-   "New from Riverside" callout (gap wording, not "conflict")
+4. Patient → Request records ("Waiting for consent...") → admin records consent on the Admin tab
+   (Review → consent reference → Record consent, or Deny) → Importing → merged → penicillin allergy
+   tag, Riverside source, "New from Riverside" callout (gap wording, not "conflict")
 5. Scribe: consent dialog → camera (video only, 1 fps, 10-frame RAM ring buffer, 512px JPEG, window
    every 10 s, drop if one is in flight, 30-min auto-stop) → live observations → Stop → AI draft
    note → Accept / Edit / Discard (attending only)
@@ -106,7 +112,7 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 | Where the AI step ran (`ran_on`) is not in the audit DDL | Assurant story | Ron |
 | How Dr. Wu opens Gregory to show "access denied" when `/patients` only lists his own patients (MRN lookup? break-the-glass?) | Demo step 9 | Ron |
 | Markdown renderer for `answer_md` is not in the library list | Ask | Ron |
-| Pending admin consent task data (Admin tab, demo step 3) | Admin tab | Ron + Alessandra |
+| Pending admin consent task data: no list route (mocks serve `/__mock/admin/consent-tasks`; live mode shows an honest error) | Admin tab | Ron + Alessandra |
 | `/records-tree` response shape; no encounter list route (Records tab composes existing routes for now) | Records tab | Ron + Alessandra |
 | Gateway has no CORS middleware; dev renderer runs on `http://localhost:5173` (packaged Electron sends `Origin: null`) | Every real API call | Ron |
 
@@ -115,7 +121,8 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 1. ~~Copy this folder into the repo (`apps/desktop/`) and add `AGENT_CONTEXT.md` (spec sections 13–17).~~ Done.
 2. `pnpm gen:api` as soon as Ron's OpenAPI exists; swap `api/types.ts` to re-export generated types.
    Go live route by route with `VITE_LIVE_ROUTES` (see `docs/BACKEND_HANDOFF.md`), then `VITE_USE_MOCKS=false`.
-3. Admin tab: pending consent tasks + "Record consent" (needed for demo step 3 with two windows).
+3. ~~Admin tab: pending consent tasks + "Record consent".~~ Consent queue done. Left: role matrix and
+   care teams (spec 14.2).
 4. Lab: OpenSeadragon viewer + heatmap overlay + real tiles from `GET /files/{path}`.
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).
 6. ~~Records tab (Blueprint Tree), Audit filters (Table2 + DateRangeInput).~~ Done.

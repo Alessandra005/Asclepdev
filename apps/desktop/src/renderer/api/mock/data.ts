@@ -167,6 +167,14 @@ export const PATIENTS: Record<string, Patient> = {
   }
 }
 
+/**
+ * Source providers a transcript can be requested from, keyed by the from_provider_id the UI sends.
+ * SPEC-QUESTION: no provider list route yet (see useRequestTranscript in api/hooks.ts).
+ */
+export const TRANSCRIPT_PROVIDERS: Record<string, string> = { riverside: 'Riverside Family Medicine' }
+/** FHIR resources a Riverside pull imports per patient (Gregory: 10 years of labs, notes, meds). */
+export const RIVERSIDE_RESOURCES: Record<string, number> = { [IDS.gregory]: 214 }
+
 /** Applied when the Riverside transcript merges (demo step 3). */
 export const GREGORY_AFTER_MERGE: Pick<Patient, 'allergies' | 'allergy_status' | 'sources'> = {
   allergies: [{ substance: 'Penicillin', provenance: prov('ehr-a', 'AllergyIntolerance/rv-221', 1) }],

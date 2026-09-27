@@ -22,11 +22,23 @@ test.afterAll(async () => {
   await app?.close()
 })
 
-test('demo steps 1-7: Gregory Hale end to end (mock gateway)', async () => {
-  // Sign in as the attending.
-  await page.getByLabel('Email').fill('reyes@asclep.demo')
+/** Mock mode prefills the password and has a Demo user select; fill both fields anyway. */
+async function signIn(email: string): Promise<void> {
+  await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill('asclep-demo')
   await page.getByRole('button', { name: 'Sign in' }).click()
+}
+
+/** The user menu is the top-bar button showing the signed-in user's full name. */
+async function signOut(fullName: string): Promise<void> {
+  await page.getByRole('button', { name: fullName, exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Sign out' }).click()
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
+}
+
+test('demo steps 1-7: Gregory Hale end to end (mock gateway)', async () => {
+  // Sign in as the attending.
+  await signIn('reyes@asclep.demo')
 
   // 1. Dashboard: only what needs her.
   await expect(page.getByText('Needs attention')).toBeVisible()
@@ -39,8 +51,28 @@ test('demo steps 1-7: Gregory Hale end to end (mock gateway)', async () => {
   await page.getByRole('menuitem', { name: /Gregory Hale/ }).click()
   await expect(page.getByText('Allergies: unknown')).toBeVisible()
   await page.getByRole('button', { name: 'Request records' }).click()
+  await expect(page.getByRole('button', { name: 'Waiting for consent...' })).toBeVisible()
 
-  // 3. Consent + merge: Riverside history, allergy that Northside did not have.
+  // 3. Consent + merge. The admin records consent (one window: mock state survives sign-out).
+  await signOut('Dr. Maya Reyes')
+  await signIn('admin@asclep.demo')
+  await expect(page.getByRole('heading', { name: 'Admin', exact: true })).toBeVisible()
+  await page
+    .getByRole('row', { name: /Gregory Hale/ })
+    .getByRole('button', { name: 'Review' })
+    .click()
+  await page.getByLabel('Consent reference').fill('Signed form #2231')
+  await page.getByRole('button', { name: 'Record consent' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByText('Recently decided')).toBeVisible()
+  await signOut('Jordan Kim')
+
+  // Back to Dr. Reyes: Riverside history, and an allergy that Northside did not have.
+  await signIn('reyes@asclep.demo')
+  await expect(page.getByText('Needs attention')).toBeVisible()
+  await page.keyboard.press('Control+k')
+  await page.getByPlaceholder('Search patients by name or MRN...').fill('Gregory')
+  await page.getByRole('menuitem', { name: /Gregory Hale/ }).click()
   await expect(page.getByText('New from Riverside')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('Penicillin allergy', { exact: true })).toBeVisible()
   await expect(page.getByText('Allergies: unknown')).toHaveCount(0)

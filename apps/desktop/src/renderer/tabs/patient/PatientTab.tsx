@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, Callout, Card, Tab, Tabs, Tag } from '@blueprintjs/core'
 import { usePatientSummary, useRequestTranscript, useTranscripts } from '@/api/hooks'
-import type { Patient } from '@/api/types'
+import type { Patient, TranscriptRequest } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { RequirePatient } from '@/components/RequirePatient'
 import { useSession } from '@/state/session'
@@ -12,6 +12,7 @@ import { MedsView } from './MedsView'
 import { NotesView } from './NotesView'
 import { SourcesView } from './SourcesView'
 import { LiveScribePanel } from './LiveScribePanel'
+import { requestButton, transferStatus } from './transferStatus'
 
 export function PatientTab() {
   return <RequirePatient>{(p) => <PatientBody patient={p} />}</RequirePatient>
@@ -24,11 +25,14 @@ function PatientBody({ patient }: { patient: Patient }) {
   const can = useSession((s) => s.can)
   const transcripts = useTranscripts(patient.id)
   const request = useRequestTranscript(patient.id)
-  const tr = transcripts.data?.items[0]
+  // The gateway lists newest first; the latest request drives the button and the transfer card.
+  const latest = transcripts.data?.items[0]
+  // Only a successful read decides the button: a loading or failed list never offers a new request.
+  const button = transcripts.isSuccess ? requestButton(latest) : null
   const hasRiverside = patient.sources.some((s) => s.source_system === 'ehr-a')
   const qc = useQueryClient()
   const userId = useSession((s) => s.user?.id)
-  const merged = tr?.status === 'merged'
+  const merged = latest?.status === 'merged'
 
   // Refetch patient + summary only once the gateway confirms the merge (kickoff p.5).
   useEffect(() => {
@@ -48,13 +52,13 @@ function PatientBody({ patient }: { patient: Patient }) {
           <Tab id="findings" title="Findings" />
           <Tab id="sources" title="Sources" />
         </Tabs>
-        {can('request_transcripts') && !hasRiverside && (
+        {can('request_transcripts') && !hasRiverside && button && (
           <Button
             intent="primary"
             icon="import"
-            text={tr ? 'Waiting for consent...' : 'Request records'}
+            text={button.text}
             loading={request.isPending}
-            disabled={!!tr}
+            disabled={button.disabled}
             onClick={() => request.mutate()}
           />
         )}
@@ -80,13 +84,7 @@ function PatientBody({ patient }: { patient: Patient }) {
             <div className="card-head mt">
               <span className="card-title">Records transfer</span>
             </div>
-            {!tr ? (
-              <p className="small muted">No transfer requested.</p>
-            ) : (
-              <Tag minimal intent={tr.status === 'merged' ? 'success' : 'warning'}>
-                {tr.from_provider}: {tr.status === 'merged' ? 'Merged' : 'Awaiting admin consent'}
-              </Tag>
-            )}
+            <QueryState query={transcripts}>{(d) => <TransferLine latest={d.items[0]} />}</QueryState>
           </Card>
           <LiveScribePanel patient={patient} />
         </div>
@@ -102,6 +100,24 @@ function PatientBody({ patient }: { patient: Patient }) {
         <SourcesView patient={patient} />
       )}
     </div>
+  )
+}
+
+/** Only reached once the transcripts list loaded, so "No transfer requested" is a confirmed empty list. */
+function TransferLine({ latest }: { latest: TranscriptRequest | undefined }) {
+  if (!latest) return <p className="small muted">No transfer requested.</p>
+  const s = transferStatus(latest)
+  return (
+    <>
+      <Tag minimal intent={s.intent}>
+        {latest.from_provider}: {s.text}
+      </Tag>
+      {latest.consent_ref && (
+        <p className="small muted mt">
+          Consent reference <span className="mono">{latest.consent_ref}</span>
+        </p>
+      )}
+    </>
   )
 }
 
