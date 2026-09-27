@@ -20,7 +20,7 @@ from app.alerts.engine import AlertDraft, _attendings_for, evaluate_object, rais
 from app.audit.log import write_audit
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
-from app.ontology import links
+from app.ontology import index, links
 from app.ontology.shapes import SOURCE_LABELS
 
 
@@ -351,6 +351,7 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
             row = _upsert(s, object_type, table, source_system, resource["id"], r["id"], cols)
             if object_type == "MedicationRequest":
                 links.med_to_inventory(s, row)
+            index.index_object(s, object_type, row)  # stage 7: re-chunk and re-embed searchable text
             evaluate_object(s, object_type, row["id"], patient_id, row)
         touched.add(patient_id)
         done(r)

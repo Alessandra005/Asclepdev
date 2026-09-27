@@ -144,6 +144,27 @@ def ask(body: AskBody, request: Request, p: Principal = Depends(require("use_ask
             "verified": answer.verified}
 
 
+class SearchBody(BaseModel):
+    query: str
+    patient_id: UUID | None = None
+
+
+@router.post("/search")
+def search(body: SearchBody, request: Request, p: Principal = Depends(require("use_ask")), s=Depends(get_session)):
+    """Top 8 chunks as {citation, text, score}; the Resident's search_records tool cites citation.id (spec 10.2)."""
+    if body.patient_id is not None:  # a direct access attempt: denied and audited like /patients/{id}/notes
+        check_patient(s, p, "view_notes", body.patient_id, "Chunk", request_id=_rid(request))
+    items = []
+    for hit in ontology.search(s, p, body.query, body.patient_id):
+        try:
+            row = ontology.peek(s, hit["object_type"], hit["object_id"])
+        except LookupError:
+            continue
+        items.append({"citation": shapes.citation(hit["object_type"], row), "text": hit["text"],
+                      "score": round(float(hit["score"]), 3)})
+    return {"items": items, "next_cursor": None}
+
+
 @router.get("/files/{path:path}")
 def files(path: str, request: Request, p: Principal = Depends(require("view_labs")), s=Depends(get_session)):
     """Heatmap / tile / thumbnail images from the Lab Technician (spec 15), for the patient's care team."""

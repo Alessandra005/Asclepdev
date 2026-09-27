@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.4"]
+embed = ["sentence-transformers>=3"]  # /search embeddings; lazily imported, absent from CI
 
 [build-system]
 requires = ["setuptools>=68"]

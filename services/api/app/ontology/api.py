@@ -322,7 +322,12 @@ def facts(s: Session, p: Principal, patient_id: UUID, fact_set: str) -> dict:
 
 
 def search(s: Session, p: Principal, query: str, patient_id: UUID | None, k: int = 8) -> list[dict]:
-    raise NotImplementedError("Alessandra: pgvector search — deferred until chunk table is populated")
+    """Vector search (7A.8). Callers check access to patient_id first; restricted chunks go to the attending only."""
+    from app.ontology import index
+    hits = [h for h in index.search(s, p.user_id, query, patient_id, k)
+            if h["sensitivity"] != "restricted" or _is_attending_for(s, p, h["patient_id"])]
+    write_audit(s, p, "read", "Chunk", patient_id=patient_id)
+    return hits
 
 
 def apply_action(s: Session, p: Principal, action: str, payload: BaseModel) -> dict:
