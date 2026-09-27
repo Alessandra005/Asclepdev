@@ -178,7 +178,7 @@ def draft_report(finding_id: UUID, request: Request, p: Principal = Depends(requ
         "cites": json.dumps([c.model_dump(mode="json") for c in draft.citations if str(c.id) in allowed]),
     }).mappings().one())
     write_audit(s, p, "create", "Report", report["id"], patient_id, request_id=_rid(request), ai="resident",
-                ran_on=RAN_ON)
+                ran_on=RAN_ON, reason=None if draft.locked_check_passed else "resident_validation_failed")
     return report_view(s, report, patient_id)
 
 

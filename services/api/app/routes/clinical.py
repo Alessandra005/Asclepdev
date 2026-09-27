@@ -139,7 +139,7 @@ def ask(body: AskBody, request: Request, p: Principal = Depends(require("use_ask
     cited = {cid: c for cid in dict.fromkeys(ids) if (c := _cited(s, p, cid, body.patient_id))}
     text_ = CITE.sub(lambda m: m.group(0) if f"{m.group(1)}:{m.group(2)}" in cited else "", answer.answer_md)
     write_audit(s, p, "create", "AskAnswer", patient_id=body.patient_id, request_id=_rid(request), ai="resident",
-                ran_on=RAN_ON)
+                ran_on=RAN_ON, reason=None if answer.verified else "resident_validation_failed")  # spec 10.4
     return {"answer_md": text_, "citations": list(cited.values()), "conversation_id": answer.conversation_id,
             "verified": answer.verified}
 

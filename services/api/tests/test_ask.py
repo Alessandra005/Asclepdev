@@ -37,3 +37,10 @@ def test_can_read_follows_role_and_care_team(fake_session):
     assert not clinical._can_read(fake_session, doc, "Finding", {"id": SEEN, "patient_id": uuid4()})  # off team
     assert clinical._can_read(fake_session, doc, "InventoryItem", {"id": SEEN})  # no patient: role scope 'all'
     assert not clinical._can_read(fake_session, Principal(uuid4(), "scribe"), "InventoryItem", {"id": SEEN})
+
+
+def test_unverified_answer_is_audited_as_validation_failure(client, fake_session, monkeypatch):
+    monkeypatch.setattr(clinical, "_post", lambda *a, **k: AskAnswer(answer_md="x", citations=[], verified=False))
+    client.post("/api/v1/ask", json={"question": "q"}, headers=token("nurse"))
+    audits = [params for sql, params in fake_session.statements if "INSERT INTO audit_log" in sql]
+    assert audits[-1]["r"] == "resident_validation_failed" and audits[-1]["k"] == "resident"

@@ -76,7 +76,8 @@ def finding(s: Session, row: dict) -> dict:
         "flags": row.get("flags") or [], "status": row["status"], "final_label": row.get("final_label"),
         "review_note": row.get("review_note"), "reviewed_by": extra.get("reviewer"),
         "reviewed_at": row.get("reviewed_at"),
-        "heatmap_url": file_url(row.get("heatmap_path")), "tile_urls": [u for t in tiles if (u := file_url(t.get("path")))],
+        "heatmap_url": file_url(row.get("heatmap_path")),
+        "thumbnail_url": file_url(row.get("thumbnail_path")), "tile_urls": [u for t in tiles if (u := file_url(t.get("path")))],
         "provenance": {"source_system": "lab-tech", "source_ref": f"Slide/{row['slide_id']}",
                        "ingested_at": row.get("created_at")},
     }
