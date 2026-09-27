@@ -1,9 +1,9 @@
 __pycache__/
 *.pyc
-<<<<<<< HEAD
 .venv/
 .env
 *.egg-info/
+build/
 .pytest_cache/
 .ruff_cache/
 node_modules/
@@ -17,9 +17,7 @@ data/embeddings/*
 !data/embeddings/.gitkeep
 data/heatmaps/*
 !data/heatmaps/.gitkeep
-=======
-
 data/generated/
-
 tools/*.jar
->>>>>>> 0a2c24e (feat(data): add mock EHR infrastructure, adapters, loader, and seed data)
+# private docs
+*Spec*.pdf

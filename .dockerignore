@@ -1,0 +1,13 @@
+# Keep secrets, private docs and bulky local state out of every image's build context.
+**/.env
+**/.venv
+**/node_modules
+**/__pycache__
+**/build
+**/*.egg-info
+.git
+*.pdf
+apps/
+data/slides
+data/embeddings
+data/heatmaps

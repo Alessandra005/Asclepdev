@@ -22,3 +22,6 @@ def create_token(user_id: str, role: str) -> str:
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+
+
+DUMMY_HASH = hash_password("timing-equalizer")  # compared against when the email is unknown

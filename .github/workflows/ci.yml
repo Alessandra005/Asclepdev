@@ -12,6 +12,7 @@ jobs:
       - run: ruff check packages services
       - run: pip install -e packages/contracts -e "services/api[dev]"
       - run: pytest services/api/tests -q
+      - run: pytest services/resident/tests -q
   desktop:
     runs-on: ubuntu-latest
     defaults:

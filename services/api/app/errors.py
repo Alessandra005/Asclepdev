@@ -33,4 +33,11 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, exc: RequestValidationError):
-        return JSONResponse(_body(request, "VALIDATION_ERROR", str(exc.errors())[:500]), status_code=422)
+        # Field locations and reasons only: never echo submitted values (passwords, PHI) back or into logs.
+        detail = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+        return JSONResponse(_body(request, "VALIDATION_ERROR", detail[:500]), status_code=422)
+
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception):
+        # Spec 15 envelope instead of a bare 500; the traceback stays in the server log only.
+        return JSONResponse(_body(request, "INTERNAL", "Something went wrong."), status_code=500)
