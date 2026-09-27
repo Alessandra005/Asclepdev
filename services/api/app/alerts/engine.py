@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 @dataclass
 class AlertDraft:
     rule_id: str
-    severity: str  # critical | warning | info
+    severity: str
     title: str
     detail: str | None = None
     patient_id: UUID | None = None
@@ -36,12 +36,13 @@ def _already_fired(s: Session, rule_id: str, patient_id: UUID | None, user_id: U
 def raise_alert(s: Session, draft: AlertDraft, triggering_object_id: UUID) -> UUID | None:
     if _already_fired(s, draft.rule_id, draft.patient_id, draft.user_id, triggering_object_id):
         return None
+    source_ids = [str(x) for x in draft.source_ids] or [str(triggering_object_id)]
     alert_id = s.execute(
         text("""INSERT INTO alert (patient_id, user_id, rule_id, severity, title, detail, source_ids)
                 VALUES (:pid, :uid, :rid, :sev, :title, :detail, CAST(:src AS jsonb)) RETURNING id"""),
         {"pid": draft.patient_id, "uid": draft.user_id, "rid": draft.rule_id,
          "sev": draft.severity, "title": draft.title, "detail": draft.detail,
-         "src": json.dumps([str(x) for x in draft.source_ids] or [str(triggering_object_id)])},
+         "src": json.dumps(source_ids)},
     ).scalar()
     return alert_id
 
@@ -88,4 +89,38 @@ def evaluate_object(s: Session, object_type: str, object_id: UUID, patient_id: U
             alert_id = raise_alert(s, draft, object_id)
             if alert_id:
                 raised.append(alert_id)
+    return raised
+
+def sweep_all(s: Session) -> list[UUID]:
+    """Periodic re-evaluation (spec §12: 'on a 60-second sweep'). Catches objects
+    written before their notification target (e.g. care team) existed. Reuses
+    raise_alert's dedup, so already-fired alerts are never duplicated."""
+    from app.alerts.rules import critical_lab, finding_pending, med_backorder
+
+    raised: list[UUID] = []
+
+    rows = s.execute(text("""SELECT id, patient_id, display, value_num, value_text, interpretation
+                              FROM observation WHERE interpretation IN ('HH', 'LL')""")).mappings().all()
+    for r in rows:
+        for draft in critical_lab.check(s, r["id"], r["patient_id"], dict(r)) or []:
+            alert_id = raise_alert(s, draft, r["id"])
+            if alert_id:
+                raised.append(alert_id)
+
+    rows = s.execute(text("""SELECT id, patient_id, status, medication_id, requested_by
+                              FROM medication_request WHERE status = 'active'""")).mappings().all()
+    for r in rows:
+        for draft in med_backorder.check(s, r["id"], r["patient_id"], dict(r)) or []:
+            alert_id = raise_alert(s, draft, r["id"])
+            if alert_id:
+                raised.append(alert_id)
+
+    rows = s.execute(text("""SELECT id, patient_id, status, label, confidence
+                              FROM finding WHERE status = 'pending_review'""")).mappings().all()
+    for r in rows:
+        for draft in finding_pending.check(s, r["id"], r["patient_id"], dict(r)) or []:
+            alert_id = raise_alert(s, draft, r["id"])
+            if alert_id:
+                raised.append(alert_id)
+
     return raised
