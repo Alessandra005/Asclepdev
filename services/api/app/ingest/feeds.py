@@ -34,9 +34,10 @@ def sync_inventory(s: Session, path: Path = INBOX / "inventory.csv") -> int:
     changed = 0
     for row in csv.DictReader(path.open(encoding="utf-8")):
         name = row["medication_name"].strip()
-        med_id = s.execute(text("SELECT id FROM medication WHERE name = :n"), {"n": name}).scalar() or \
-            s.execute(text("INSERT INTO medication (id, name) VALUES (gen_random_uuid(), :n) RETURNING id"),
-                      {"n": name}).scalar()
+        # medication.name is UNIQUE (migration 004): a seed racing the feed thread inserts once, then both select.
+        s.execute(text("INSERT INTO medication (id, name) VALUES (gen_random_uuid(), :n) ON CONFLICT (name) DO NOTHING"),
+                  {"n": name})
+        med_id = s.execute(text("SELECT id FROM medication WHERE name = :n"), {"n": name}).scalar()
         offset = (row.get("expected_restock_offset_days") or "").strip()
         values = {"m": med_id, "oh": int(row["on_hand"]), "rp": int(row["reorder_point"]),
                   "bo": row["backordered"].strip().lower() == "true",
@@ -105,6 +106,10 @@ def start() -> threading.Event:
     stop = threading.Event()
 
     def loop() -> None:
+        try:
+            index.embed(["warm up"])  # load the model now, not on demo step 3's consent click
+        except Exception:  # e.g. no network for the first download: search stays empty, the feeds still run
+            logger.exception("Embedding model warm-up failed")
         while True:
             with SessionLocal() as s:
                 try:
