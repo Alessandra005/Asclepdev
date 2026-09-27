@@ -16,7 +16,7 @@ services:
       retries: 10
 
   api:
-    build: {context: .., dockerfile: services/api/Dockerfile}
+    build: {context: .., dockerfile: services/api/Dockerfile, args: {EMBED: "1"}}
     env_file: .env
     environment:
       LABTECH_URL: http://lab-tech:8000
@@ -28,7 +28,8 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       mongo: {condition: service_healthy}
-    volumes: [../data:/srv/data]
+    # bge-small weights download once (~130 MB) and are cached here
+    volumes: [../data:/srv/data, api-models:/root/.cache/huggingface]
 
   # LiveScribing store (conversation transcripts, observations, actions, reports). Text only, never media.
   mongo:
@@ -94,3 +95,4 @@ volumes:
   pgdata:
   mongodata:
   resident-models:
+  api-models:
