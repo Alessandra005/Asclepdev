@@ -1,6 +1,6 @@
 COMPOSE = docker compose -f infra/docker-compose.yml --env-file infra/.env
 
-.PHONY: up down logs seed reset-db dev-seed mongo-ui test gen-api dev-desktop dev-desktop-live dev-desktop-full demo-check migrate
+.PHONY: up down logs seed reset-db reset-scribe dev-seed mongo-ui test gen-api dev-desktop dev-desktop-live dev-desktop-full demo-check migrate
 
 up:            ## start all services
 	$(COMPOSE) up -d --build
@@ -16,6 +16,9 @@ migrate:       ## apply DB migrations
 
 reset-db:      ## DESTRUCTIVE: empty the Asclep database (spec 16 seed step 1). Mock EHRs and Mongo are kept.
 	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
+
+reset-scribe:  ## DESTRUCTIVE: delete every LiveScribing session (Mongo). Text only; patients are re-copied by dev-seed.
+	$(COMPOSE) exec mongo mongosh --quiet asclep --eval 'print("deleted", db.scribe_sessions.deleteMany({}).deletedCount, "LiveScribing sessions")'
 
 # Spec 16: `make seed` rebuilds from scratch. dev-seed first: ingestion then matches the golden patients to
 # its fixed ids (the desktop's ids).
