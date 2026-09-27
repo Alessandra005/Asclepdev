@@ -24,10 +24,10 @@ USERS = [  # (id, email, full name, role)
     ("0d000000-0000-4000-8000-000000000004", "lab@asclep.demo", "Sam Patel", "lab_staff"),
     ("0d000000-0000-4000-8000-000000000005", "wu@asclep.demo", "Dr. Henry Wu", "physician"),
 ]
-PATIENTS = [  # (id, mrn, given, family, birth date, sex)
-    (GREGORY, "NS-004417", "Gregory", "Hale", date(1962, 3, 14), "M"),
-    (LINDA, "NS-002981", "Linda", "Morales", date(1955, 6, 2), "F"),
-    (PRIYA, "NS-003350", "Priya", "Shah", date(1968, 1, 20), "F"),
+PATIENTS = [  # (id, mrn, given, family, birth date, sex); birth dates match data/seed/golden so ingestion links to these ids
+    (GREGORY, "NS-004417", "Gregory", "Hale", date(1962, 4, 12), "M"),
+    (LINDA, "NS-002981", "Linda", "Morales", date(1955, 7, 9), "F"),
+    (PRIYA, "NS-003350", "Priya", "Shah", date(1968, 11, 23), "F"),
 ]
 REYES, OKAFOR, WU = USERS[1][0], USERS[2][0], USERS[4][0]
 CARE_TEAM = [  # (patient, user, relationship)

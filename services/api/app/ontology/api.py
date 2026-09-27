@@ -305,3 +305,25 @@ def apply_action(s: Session, p: Principal, action: str, payload: BaseModel) -> d
         from app.ingest.pipeline import ingest_bundle
         return ingest_bundle(s, p, payload)
     raise NotImplementedError(f"Alessandra: action '{action}' not implemented yet")
+
+def medication_stock(s: Session, medication_id: UUID | None) -> tuple[str | None, str | None]:
+    """(medication name, inventory status) for a MedicationRequest's medication_id.
+
+    Status is 'backordered' | 'low' | 'in_stock' (spec 12 MED_BACKORDER rules), or None when the
+    request isn't linked to a stocked medication. Not patient data, so no audit row.
+    """
+    if medication_id is None:
+        return None, None
+    row = s.execute(
+        text("""SELECT m.name, i.on_hand, i.reorder_point, i.backordered
+                FROM medication m LEFT JOIN inventory_item i ON i.medication_id = m.id
+                WHERE m.id = :mid LIMIT 1"""),
+        {"mid": medication_id},
+    ).mappings().first()
+    if not row:
+        return None, None
+    if row["on_hand"] is None:
+        return row["name"], None
+    if row["backordered"] or row["on_hand"] == 0:
+        return row["name"], "backordered"
+    return row["name"], "low" if row["on_hand"] < row["reorder_point"] else "in_stock"

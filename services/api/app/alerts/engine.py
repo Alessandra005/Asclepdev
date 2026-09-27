@@ -1,4 +1,5 @@
 """Alert rule engine (spec section 12). Owner: Alessandra."""
+import json
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -17,27 +18,30 @@ class AlertDraft:
     source_ids: list[str] = field(default_factory=list)
 
 
-def _already_fired(s: Session, rule_id: str, patient_id: UUID | None, triggering_object_id: UUID) -> bool:
+def _already_fired(s: Session, rule_id: str, patient_id: UUID | None, user_id: UUID | None,
+                  triggering_object_id: UUID) -> bool:
     """Dedupe key = (rule_id, patient_id, triggering object id). Never raise the same
     alert twice. SPEC-QUESTION(Ron): enforced here at the app layer via source_ids
     containment check; a DB-level unique index would be safer but needs a migration."""
     return s.execute(
         text("""SELECT 1 FROM alert WHERE rule_id = :rid
                 AND (patient_id = :pid OR (:pid IS NULL AND patient_id IS NULL))
-                AND source_ids @> :src"""),
-        {"rid": rule_id, "pid": patient_id, "src": f'["{triggering_object_id}"]'},
+                AND user_id IS NOT DISTINCT FROM :uid
+                AND source_ids @> CAST(:src AS jsonb)"""),
+        # One row per recipient (spec 12: attending + nurses), so the recipient is part of the dedupe key.
+        {"rid": rule_id, "pid": patient_id, "uid": user_id, "src": json.dumps([str(triggering_object_id)])},
     ).first() is not None
 
 
 def raise_alert(s: Session, draft: AlertDraft, triggering_object_id: UUID) -> UUID | None:
-    if _already_fired(s, draft.rule_id, draft.patient_id, triggering_object_id):
+    if _already_fired(s, draft.rule_id, draft.patient_id, draft.user_id, triggering_object_id):
         return None
     alert_id = s.execute(
         text("""INSERT INTO alert (patient_id, user_id, rule_id, severity, title, detail, source_ids)
-                VALUES (:pid, :uid, :rid, :sev, :title, :detail, :src) RETURNING id"""),
+                VALUES (:pid, :uid, :rid, :sev, :title, :detail, CAST(:src AS jsonb)) RETURNING id"""),
         {"pid": draft.patient_id, "uid": draft.user_id, "rid": draft.rule_id,
          "sev": draft.severity, "title": draft.title, "detail": draft.detail,
-         "src": [str(x) for x in draft.source_ids] or [str(triggering_object_id)]},
+         "src": json.dumps([str(x) for x in draft.source_ids] or [str(triggering_object_id)])},
     ).scalar()
     return alert_id
 
@@ -50,6 +54,13 @@ def _attending_and_nurses_for(s: Session, patient_id: UUID) -> list[UUID]:
         {"pid": patient_id},
     ).scalars().all()
     return list(rows)
+
+
+def _attendings_for(s: Session, patient_id: UUID) -> list[UUID]:
+    return list(s.execute(
+        text("SELECT user_id FROM care_team_member WHERE patient_id = :pid AND relationship = 'attending'"),
+        {"pid": patient_id},
+    ).scalars().all())
 
 
 def _attending_for(s: Session, patient_id: UUID) -> UUID | None:

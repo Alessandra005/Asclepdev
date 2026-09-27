@@ -333,7 +333,7 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
 def ingest_bundle(s: Session, p: Principal, payload: IngestBundleRequest) -> dict:
     """Entry point called from ontology.apply_action('ingest_bundle', ...)."""
     provider = s.execute(
-        text("SELECT fhir_base_url, kind FROM provider WHERE id = :id"),
+        text("SELECT name, fhir_base_url, kind FROM provider WHERE id = :id"),
         {"id": payload.provider_id},
     ).mappings().first()
     if not provider:
