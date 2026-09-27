@@ -53,3 +53,23 @@ def test_break_the_glass_grant_can_read_transcripts(client, fake_session):
     app.dependency_overrides[get_session] = lambda: Emergency()
     r = client.get(f"/api/v1/patients/{uuid4()}/transcripts", headers=token("physician"))
     assert r.status_code == 200 and r.json() == {"items": [], "next_cursor": None}
+
+
+def test_nurse_on_the_care_team_reads_transcripts(client):
+    from app.db import get_session
+    from app.main import app
+    from tests.conftest import FakeSession
+
+    class OnTeam(FakeSession):
+        def execute(self, stmt, params=None):
+            result = super().execute(stmt, params)
+            if "FROM care_team_member" in str(stmt):
+                result.scalar = lambda: "nurse"
+            return result
+
+    app.dependency_overrides[get_session] = lambda: OnTeam()
+    try:
+        r = client.get(f"/api/v1/patients/{uuid4()}/transcripts", headers=token("nurse"))
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200 and r.json() == {"items": [], "next_cursor": None}

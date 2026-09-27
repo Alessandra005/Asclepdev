@@ -47,7 +47,8 @@ def create_transcript_request(
 @router.get("/patients/{patient_id}/transcripts")
 def list_patient_transcripts(
     patient_id: UUID,
-    p: Principal = Depends(require("request_transcripts", patient_param="patient_id", object_type="TranscriptRequest")),
+    # Spec 15: reading requests is care team (nurses too); only creating one needs request_transcripts.
+    p: Principal = Depends(require("view_labs", patient_param="patient_id", object_type="TranscriptRequest")),
     s=Depends(get_session),
 ):
     return {"items": list_transcripts_for_patient(s, p, patient_id), "next_cursor": None}
