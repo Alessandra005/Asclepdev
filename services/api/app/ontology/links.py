@@ -34,6 +34,10 @@ def cross_source_conflict(s: Session, patient_id: UUID) -> list[dict]:
     """conflicts_with: an allergy or active medication one source records and another source that holds
     records for this patient does not. Links go from the record to the Patient (the other side is an absence).
     Returns the newly found conflicts: {object_type, id, name, source_system, missing_from}."""
+    # SPEC-QUESTION(Alessandra): 7A.9 has Gregory's Riverside albuterol linked to inventory and exactly one conflict
+    # (penicillin), but the rule as specced (allergies, active meds, active problems) would also flag an active
+    # albuterol order absent from Northside. Fixture has no albuterol; decide whether med absences are conflicts or
+    # gaps before adding it.
     sources = set(s.execute(text("""
         SELECT source_system FROM patient WHERE id = :p
         UNION SELECT source_system FROM encounter WHERE patient_id = :p
