@@ -180,7 +180,7 @@ def seed_appointments(s: Session) -> None:
     tz = ZoneInfo(settings.demo_tz)
     today = datetime.now(tz).date()
     others = s.execute(text("""SELECT patient_id FROM care_team_member WHERE user_id = :u
-                               AND NOT (patient_id = ANY(:golden)) ORDER BY patient_id LIMIT :n"""),
+                               AND NOT (patient_id = ANY(CAST(:golden AS uuid[]))) ORDER BY patient_id LIMIT :n"""),
                        {"u": REYES, "golden": list(GOLDEN_VISITS), "n": len(OTHER_SLOTS)}).scalars()
     visits = [(pid, at, reason) for pid, (at, reason) in GOLDEN_VISITS.items()] + \
         [(pid, at, "Follow-up") for pid, at in zip(others, OTHER_SLOTS)]

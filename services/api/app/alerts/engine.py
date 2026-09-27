@@ -64,13 +64,6 @@ def _attendings_for(s: Session, patient_id: UUID) -> list[UUID]:
     ).scalars().all())
 
 
-def _attending_for(s: Session, patient_id: UUID) -> UUID | None:
-    return s.execute(
-        text("""SELECT user_id FROM care_team_member WHERE patient_id = :pid AND relationship = 'attending'"""),
-        {"pid": patient_id},
-    ).scalar()
-
-
 def evaluate_object(s: Session, object_type: str, object_id: UUID, patient_id: UUID | None, row: dict) -> list[UUID]:
     """Run every applicable rule against one newly-written object (the in-process
     hook per spec §12: 'Rules run after every ontology write')."""
