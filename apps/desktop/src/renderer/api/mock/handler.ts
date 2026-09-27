@@ -7,6 +7,7 @@ import { GatewayError } from '../errors'
 import type {
   AskResponse,
   AuditRow,
+  CitationKind,
   ConsentDecision,
   ConsentTask,
   DashboardResponse,
@@ -21,6 +22,9 @@ import type {
   MeResponse,
   Note,
   Patient,
+  Provenance,
+  RecordsTree,
+  RecordsTreeItem,
   ReviewRequest,
   ScribeAction,
   ScribeReviewRequest,
@@ -28,6 +32,7 @@ import type {
   ScribeSession,
   ScribeWindow,
   Slide,
+  SourceRecord,
   TranscriptRequest,
   User
 } from '../types'
@@ -349,6 +354,81 @@ function patientView(id: string): Patient {
   return id === IDS.gregory && state.merged ? { ...p, ...GREGORY_AFTER_MERGE } : p
 }
 
+/** Mock records_tree rows, built from the same data the list routes serve; /sources resolves them too. */
+interface TreeEntry {
+  folder: string
+  item: RecordsTreeItem
+  kind: CitationKind
+  body: string
+  provenance: Provenance
+}
+const TREE_FOLDERS = ['Labs', 'Problems', 'Allergies', 'Notes', 'Pathology']
+function treeEntries(pid: string): TreeEntry[] {
+  const e = (
+    folder: string,
+    type: string,
+    kind: CitationKind,
+    id: string,
+    title: string,
+    at: string | null,
+    provenance: Provenance,
+    body = title
+  ): TreeEntry => ({
+    folder,
+    kind,
+    body,
+    provenance,
+    item: { type, id, title, effective_at: at, source_system: provenance.source_system }
+  })
+  const g = pid === IDS.gregory
+  const labs = g
+    ? [...GREGORY_LABS_NORTHSIDE, ...(state.merged ? GREGORY_LABS_RIVERSIDE : [])]
+    : pid === IDS.linda
+      ? LINDA_LABS
+      : []
+  const notes = g
+    ? [...GREGORY_NOTES_NORTHSIDE, ...(state.merged ? GREGORY_NOTES_RIVERSIDE : [])]
+    : pid === IDS.linda
+      ? LINDA_NOTES
+      : []
+  const summary = g ? (state.merged ? SUMMARY_AFTER : SUMMARY_BEFORE) : null
+  const value = (o: (typeof labs)[number]): string =>
+    `${o.value_num ?? o.value_text ?? ''} ${o.unit ?? ''}`.trim()
+  return [
+    ...labs.map((o) =>
+      e('Labs', 'Observation', 'observation', o.id, `${o.display}: ${value(o)}`, o.effective_at, o.provenance)
+    ),
+    ...(summary?.conditions ?? []).map((c) =>
+      e('Problems', 'Condition', 'condition', c.provenance.source_ref, c.display, null, c.provenance)
+    ),
+    ...(summary?.allergies ?? []).map((a) =>
+      e(
+        'Allergies',
+        'Allergy',
+        'allergy',
+        a.provenance.source_ref,
+        `Allergy: ${a.substance}`,
+        null,
+        a.provenance
+      )
+    ),
+    ...notes.map((n) => e('Notes', 'Note', 'note', n.id, n.title, n.effective_at, n.provenance, n.body)),
+    ...(g && state.analyzed
+      ? [
+          e(
+            'Pathology',
+            'Finding',
+            'finding',
+            state.finding.id,
+            `${state.finding.label} (${state.finding.status})`,
+            state.finding.reviewed_at,
+            state.finding.provenance
+          )
+        ]
+      : [])
+  ]
+}
+
 export async function mockGateway(
   method: string,
   fullPath: string,
@@ -543,6 +623,19 @@ export async function mockGateway(
     requireCareTeam(u, r[1]!, 'finding')
     return { items: r[1] === IDS.gregory && state.analyzed ? [state.finding] : [], next_cursor: null }
   }
+  if ((r = m(/^\/patients\/([^/]+)\/records-tree$/))) {
+    requireCareTeam(u, r[1]!, 'records_tree')
+    requirePerm(u, 'view_labs')
+    const entries = treeEntries(r[1]!).sort((a, b) =>
+      (b.item.effective_at ?? '').localeCompare(a.item.effective_at ?? '')
+    )
+    return {
+      folders: TREE_FOLDERS.map((name) => ({
+        name,
+        items: entries.filter((x) => x.folder === name).map((x) => x.item)
+      }))
+    } satisfies RecordsTree
+  }
   if ((r = m(/^\/patients\/([^/]+)\/slides$/))) {
     requireCareTeam(u, r[1]!, 'slide')
     const slide: Slide = {
@@ -589,10 +682,30 @@ export async function mockGateway(
 
   // ---- GET /sources/{id}: citation source lookup
   if ((r = m(/^\/sources\/([^/]+)$/))) {
-    const rec = SOURCE_RECORDS[decodeURIComponent(r[1]!)]
-    if (!rec) fail(404, 'NOT_FOUND', 'Source record not found.')
-    audit(u, 'read', rec!.citation.kind, 'Gregory Hale')
-    return rec
+    const id = decodeURIComponent(r[1]!)
+    const rec = SOURCE_RECORDS[id]
+    if (rec) {
+      audit(u, 'read', rec.citation.kind, 'Gregory Hale')
+      return rec
+    }
+    for (const pid of Object.keys(PATIENTS)) {
+      const hit = treeEntries(pid).find((x) => `${x.item.type}:${x.item.id}` === id)
+      if (!hit) continue
+      requireCareTeam(u, pid, hit.kind)
+      return {
+        citation: {
+          id,
+          kind: hit.kind,
+          label: hit.item.title,
+          object_id: hit.item.id,
+          provenance: hit.provenance
+        },
+        title: hit.item.title,
+        body: hit.body,
+        recorded_at: hit.item.effective_at ?? hit.provenance.ingested_at
+      } satisfies SourceRecord
+    }
+    fail(404, 'NOT_FOUND', 'Source record not found.')
   }
 
   // ---- Scribe (spec 10.5)

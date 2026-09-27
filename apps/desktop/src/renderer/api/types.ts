@@ -242,6 +242,19 @@ export interface SourceRecord {
 
 // ---- Lab
 export type FindingStatus = 'pending_review' | 'confirmed' | 'overridden' | 'rejected'
+/** GET /patients/{id}/records-tree: the records_tree view (spec 7A.6), newest first, no limits. */
+export interface RecordsTreeItem {
+  /** Registry object type; with id it forms the '<Type>:<uuid>' key GET /sources resolves. */
+  type: string
+  id: string
+  title: string
+  effective_at: IsoDateTime | null
+  source_system: string
+}
+export interface RecordsTree {
+  folders: { name: string; items: RecordsTreeItem[] }[]
+}
+
 /** GET /patients/{id}/slides, newest first. finding_id null = not analyzed yet. */
 export interface Slide {
   id: Uuid

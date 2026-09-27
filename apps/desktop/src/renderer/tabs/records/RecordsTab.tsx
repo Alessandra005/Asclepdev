@@ -1,57 +1,40 @@
 import { useState } from 'react'
-import { Card, Spinner, Tree, type TreeNodeInfo } from '@blueprintjs/core'
-import type { UseQueryResult } from '@tanstack/react-query'
-import { useFindings, usePatientNotes, usePatientObservations, usePatientSummary } from '@/api/hooks'
-import type { Patient } from '@/api/types'
+import { Card, Tree, type TreeNodeInfo } from '@blueprintjs/core'
+import { useRecordsTree } from '@/api/hooks'
+import type { Patient, RecordsTree, RecordsTreeItem } from '@/api/types'
+import { QueryState } from '@/components/QueryState'
 import { RequirePatient } from '@/components/RequirePatient'
 import { RecordDetail } from './RecordDetail'
-import {
-  encounterFiles,
-  FOLDERS,
-  labFiles,
-  noteFiles,
-  pathologyFiles,
-  type FolderId,
-  type RecordFile
-} from './recordsTree'
 
 export function RecordsTab() {
   return <RequirePatient>{(p) => <RecordsBody patient={p} />}</RequirePatient>
 }
 
-/** undefined = loading, null = failed to load (never shown as an empty folder). */
-export type FolderFiles = RecordFile[] | null | undefined
-
-const settle = <T,>(q: UseQueryResult<T>, map: (d: T) => RecordFile[]): FolderFiles =>
-  q.isError ? null : q.data === undefined ? undefined : map(q.data)
-
-/**
- * SPEC-QUESTION: GET /patients/{id}/records-tree has no response shape in spec 15. Until it does,
- * the tree is composed from routes we already call. Encounters only has the last encounter (from
- * /summary) because there is no encounter list route.
- */
+/** records_tree view (spec 7A.8): the gateway groups every object by registry folder, newest first. */
 function RecordsBody({ patient }: { patient: Patient }) {
-  const summary = usePatientSummary(patient.id)
-  const labs = usePatientObservations(patient.id, 'laboratory')
-  const notes = usePatientNotes(patient.id)
-  const findings = useFindings(patient.id)
+  const q = useRecordsTree(patient.id)
   const sourceLabel = (sys: string): string =>
     sys === 'asclep' ? 'Asclep' : (patient.sources.find((s) => s.source_system === sys)?.label ?? sys)
   return (
     <div className="page">
-      <RecordsView
-        patientName={patient.name}
-        sourceLabel={sourceLabel}
-        folders={{
-          encounters: settle(summary, encounterFiles),
-          labs: settle(labs, labFiles),
-          notes: settle(notes, (d) => noteFiles(d.items)),
-          pathology: settle(findings, (d) => pathologyFiles(d.items))
+      <QueryState
+        query={q}
+        isEmpty={(d) => d.folders.every((f) => f.items.length === 0)}
+        empty={{
+          icon: 'folder-close',
+          title: 'No records yet',
+          description: 'Nothing has been ingested for this patient.'
         }}
-      />
+      >
+        {(d) => <RecordsView patientName={patient.name} folders={d.folders} sourceLabel={sourceLabel} />}
+      </QueryState>
     </div>
   )
 }
+
+const key = (i: RecordsTreeItem): string => `${i.type}:${i.id}`
+/** Labs are sub-foldered by test ("Glucose: 110 mg/dL" -> "Glucose") so ten years of results stay browsable. */
+const labGroup = (i: RecordsTreeItem): string => i.title.split(':')[0] ?? i.title
 
 export function RecordsView({
   patientName,
@@ -59,57 +42,39 @@ export function RecordsView({
   sourceLabel
 }: {
   patientName: string
-  folders: Record<FolderId, FolderFiles>
+  folders: RecordsTree['folders']
   sourceLabel: (sourceSystem: string) => string
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const all = Object.values(folders).flatMap((f) => f ?? [])
-  const selected = all.find((f) => f.id === selectedId) ?? null
+  const [selected, setSelected] = useState<{ folder: string; item: RecordsTreeItem } | null>(null)
 
-  const fileNode = (f: RecordFile): TreeNodeInfo => ({
-    id: f.id,
-    label: f.name,
-    icon: f.unverified ? 'warning-sign' : 'document',
-    isSelected: f.id === selectedId
+  const fileNode = (i: RecordsTreeItem): TreeNodeInfo => ({
+    id: key(i),
+    label: i.title,
+    icon: 'document',
+    isSelected: selected !== null && key(selected.item) === key(i)
   })
-  const folderNode = (
-    id: string,
-    label: string,
-    files: RecordFile[],
-    children: TreeNodeInfo[]
-  ): TreeNodeInfo => ({
+  const folderNode = (id: string, label: string, count: number, children: TreeNodeInfo[]): TreeNodeInfo => ({
     id,
     label,
     icon: expanded.has(id) ? 'folder-open' : 'folder-close',
     isExpanded: expanded.has(id),
-    hasCaret: files.length > 0,
-    secondaryLabel: <span className="small muted">{files.length}</span>,
+    hasCaret: count > 0,
+    secondaryLabel: <span className="small muted">{count}</span>,
     childNodes: children
   })
 
-  const nodes: TreeNodeInfo[] = FOLDERS.map(({ id, label }) => {
-    const files = folders[id]
-    const fid = `f:${id}`
-    if (files === undefined)
-      return { id: fid, label, icon: 'folder-close', secondaryLabel: <Spinner size={12} />, disabled: true }
-    if (files === null)
-      return {
-        id: fid,
-        label,
-        icon: 'folder-close',
-        disabled: true,
-        secondaryLabel: <span className="small muted">Unavailable</span>
-      }
-    if (id !== 'labs') return folderNode(fid, label, files, files.map(fileNode))
-    const groups = [...new Set(files.map((f) => f.group ?? ''))]
+  const nodes: TreeNodeInfo[] = folders.map(({ name, items }) => {
+    const fid = `f:${name}`
+    if (name !== 'Labs') return folderNode(fid, name, items.length, items.map(fileNode))
+    const groups = [...new Set(items.map(labGroup))]
     return folderNode(
       fid,
-      label,
-      files,
+      name,
+      items.length,
       groups.map((g) => {
-        const inGroup = files.filter((f) => (f.group ?? '') === g)
-        return folderNode(`g:${g}`, g, inGroup, inGroup.map(fileNode))
+        const inGroup = items.filter((i) => labGroup(i) === g)
+        return folderNode(`g:${g}`, g, inGroup.length, inGroup.map(fileNode))
       })
     )
   })
@@ -121,6 +86,12 @@ export function RecordsView({
       else n.delete(id)
       return n
     })
+  const pick = (id: string): void => {
+    for (const f of folders) {
+      const item = f.items.find((i) => key(i) === id)
+      if (item) return setSelected({ folder: f.name, item })
+    }
+  }
 
   return (
     <div className="grid">
@@ -135,12 +106,17 @@ export function RecordsView({
           onNodeClick={(n) => {
             const id = String(n.id)
             if (n.childNodes) toggle(id, !expanded.has(id))
-            else setSelectedId(id)
+            else pick(id)
           }}
         />
       </Card>
       <div className="span-8">
-        <RecordDetail patientName={patientName} file={selected} sourceLabel={sourceLabel} />
+        <RecordDetail
+          patientName={patientName}
+          folder={selected?.folder ?? null}
+          item={selected?.item ?? null}
+          sourceLabel={sourceLabel}
+        />
       </div>
     </div>
   )

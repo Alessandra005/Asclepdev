@@ -1,18 +1,23 @@
-import { Breadcrumbs, Card, HTMLTable, NonIdealState, Tag } from '@blueprintjs/core'
+import { Breadcrumbs, Card, HTMLTable, NonIdealState } from '@blueprintjs/core'
+import { useSourceRecord } from '@/api/hooks'
+import type { RecordsTreeItem } from '@/api/types'
+import { QueryState } from '@/components/QueryState'
 import { RelativeTime } from '@/components/RelativeTime'
-import { FOLDERS, type RecordFile } from './recordsTree'
 
-/** The selected file: its fields, full text if any, and where it came from. */
+/** The selected file, read through GET /sources (same RBAC and audit as a citation chip), with provenance. */
 export function RecordDetail({
   patientName,
-  file,
+  folder,
+  item,
   sourceLabel
 }: {
   patientName: string
-  file: RecordFile | null
+  folder: string | null
+  item: RecordsTreeItem | null
   sourceLabel: (sourceSystem: string) => string
 }) {
-  if (!file)
+  const q = useSourceRecord(item ? `${item.type}:${item.id}` : null)
+  if (!item)
     return (
       <Card className="card">
         <NonIdealState
@@ -22,55 +27,50 @@ export function RecordDetail({
         />
       </Card>
     )
-  const folder = FOLDERS.find((f) => f.id === file.folder)?.label ?? file.folder
   return (
     <Card className="card">
       <Breadcrumbs
         items={[
           { text: patientName, icon: 'person' },
-          { text: folder, icon: 'folder-close' },
-          ...(file.group ? [{ text: file.group, icon: 'folder-close' as const }] : []),
-          { text: file.name, icon: 'document' }
+          { text: folder ?? item.type, icon: 'folder-close' },
+          { text: item.title, icon: 'document' }
         ]}
       />
-      {file.unverified && (
-        <Tag minimal intent="warning" icon="warning-sign" className="mt">
-          Unverified AI finding
-        </Tag>
-      )}
-      <HTMLTable compact className="kv mt">
-        <tbody>
-          {file.fields.map(([k, v]) => (
-            <tr key={k}>
-              <th>{k}</th>
-              <td>{v}</td>
-            </tr>
-          ))}
-        </tbody>
-      </HTMLTable>
-      {file.body && <pre className="note-body mt">{file.body}</pre>}
-      <div className="label">Provenance</div>
-      <HTMLTable compact className="kv">
-        <tbody>
-          <tr>
-            <th>Source</th>
-            <td>
-              {sourceLabel(file.provenance.source_system)}{' '}
-              <span className="mono muted small">({file.provenance.source_system})</span>
-            </td>
-          </tr>
-          <tr>
-            <th>Reference</th>
-            <td className="mono">{file.provenance.source_ref}</td>
-          </tr>
-          <tr>
-            <th>Ingested</th>
-            <td>
-              <RelativeTime iso={file.provenance.ingested_at} />
-            </td>
-          </tr>
-        </tbody>
-      </HTMLTable>
+      <QueryState query={q}>
+        {(rec) => (
+          <>
+            <pre className="note-body mt">{rec.body}</pre>
+            <div className="label">Provenance</div>
+            <HTMLTable compact className="kv">
+              <tbody>
+                <tr>
+                  <th>Source</th>
+                  <td>
+                    {sourceLabel(rec.citation.provenance.source_system)}{' '}
+                    <span className="mono muted small">({rec.citation.provenance.source_system})</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th>Reference</th>
+                  <td className="mono">{rec.citation.provenance.source_ref}</td>
+                </tr>
+                <tr>
+                  <th>Recorded</th>
+                  <td>
+                    <RelativeTime iso={rec.recorded_at} />
+                  </td>
+                </tr>
+                <tr>
+                  <th>Ingested</th>
+                  <td>
+                    <RelativeTime iso={rec.citation.provenance.ingested_at} />
+                  </td>
+                </tr>
+              </tbody>
+            </HTMLTable>
+          </>
+        )}
+      </QueryState>
     </Card>
   )
 }

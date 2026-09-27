@@ -117,13 +117,14 @@ and `services/api/app/rbac/permissions.py`. Keep them identical when those files
 | Question | Blocks | Ask |
 |---|---|---|
 | `from_provider_id` for transcript requests: no provider list endpoint | Request records | Alessandra |
-| `/records-tree` exists live (`{folders:[{name, items[]}]}`); Records tab still composes other routes | Records tab | (ours to switch) |
+| `/sources` 404s on `Specimen` (Pathology folder) and the Observation body lacks ref range / flag; routed to cc | Records detail | Alessandra |
 
 Resolved (Sep 27): citations use `GET /sources/{Type:uuid}` in both modes; Dr. Wu reaches Gregory by
 exact MRN and gets the Emergency access screen (`POST /patients/{id}/emergency-access`); consent queue
 is `GET /admin/consent-tasks`; `answer_md` is rendered by `tabs/ask/answerParts.ts` (bold + inline
 `[[obj:Type:uuid]]` chips, no markdown library); the Lab viewer stacks thumbnail + heatmap `<img>` blobs
 from `/files` (same size, so no OpenSeadragon); the Lab tab lists `GET /patients/{id}/slides`;
+the Records tab reads `GET /patients/{id}/records-tree` and opens files via `/sources`;
 `ran_on` is in audit rows; the gateway has CORS middleware. `scribeApi` in `hooks.ts` is dead code (LiveScribe replaced it).
 
 Node: the shell may have Node 18; the app needs ≥20.19. Electron bundles Node 22, so gates run as
@@ -141,7 +142,7 @@ Node: the shell may have Node 18; the app needs ≥20.19. Electron bundles Node 
 5. ~~Patient sub-tabs: Labs (Recharts trend), Meds (inventory status), Notes, Findings, Sources.~~ Done (not yet walked in the running app).
 6. ~~Records tab (Blueprint Tree), Audit filters (Table2 + DateRangeInput).~~ Done.
 7. ~~One Playwright e2e over demo steps 1–7 (spec 18.5).~~ Done: `e2e/demo.spec.ts`.
-8. Left: Records tab → `/records-tree`, dashboard alert ack / task complete, Admin role matrix + care teams,
+8. Left: dashboard alert ack / task complete, Admin role matrix + care teams,
    live walk with `make dev-desktop-full` after Ron's reseed.
 
 ## Scribe backend notes (Brandon's vlmlol prototype, reviewed earlier)

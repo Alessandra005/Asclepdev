@@ -22,6 +22,7 @@ import type {
   Patient,
   PatientListItem,
   PatientSummary,
+  RecordsTree,
   Report,
   ReviewRequest,
   ScribeReviewRequest,
@@ -190,6 +191,15 @@ export const useFindings = (patientId: string | null) => {
   return useQuery({
     queryKey: [k, 'patient', patientId, 'findings'],
     queryFn: () => gateway<ListResponse<Finding>>(`/patients/${patientId}/findings`),
+    enabled: !!patientId
+  })
+}
+
+export const useRecordsTree = (patientId: string | null) => {
+  const k = useUserKey()
+  return useQuery({
+    queryKey: [k, 'patient', patientId, 'records-tree'],
+    queryFn: () => gateway<RecordsTree>(`/patients/${patientId}/records-tree`),
     enabled: !!patientId
   })
 }
