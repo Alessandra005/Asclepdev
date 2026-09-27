@@ -7,6 +7,8 @@ from app.errors import install_error_handlers
 from app.routes.health import router as health_router
 from app.routes.patients import router as patients_router
 
+from app.routes.alerts import router as alerts_router
+
 app = FastAPI(title="Asclep Gateway", version="0.1.0")
 install_error_handlers(app)
 
@@ -24,3 +26,4 @@ app.include_router(health_router, prefix=API)
 app.include_router(auth_router, prefix=API)
 app.include_router(patients_router, prefix=API)
 # New routers: add here, and make sure every route uses require() (see tests/test_routes_require.py)
+app.include_router(alerts_router, prefix=API)

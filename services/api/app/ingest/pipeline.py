@@ -16,12 +16,19 @@ from sqlalchemy.orm import Session
 
 from app.auth.principal import Principal
 from app.ehr.hapi import HapiAdapter
+from app.alerts.engine import evaluate_object
 
 # Only these resource types are mapped into clinical tables today. Everything else
 # still lands in raw_record for history/audit, but isn't surfaced through ontology yet. 
 _MAPPED_TYPES = {"Patient", "Encounter", "Observation", "Condition",
                   "AllergyIntolerance", "MedicationRequest"}
 
+_RESOURCE_MAP = {
+    "Observation": {"ontology_type": "Observation", "table": "observation"},
+    "Condition": {"ontology_type": "Condition", "table": "condition"},
+    "AllergyIntolerance": {"ontology_type": "Allergy", "table": "allergy"},
+    "MedicationRequest": {"ontology_type": "MedicationRequest", "table": "medication_request"},
+}
 
 class IngestBundleRequest(BaseModel):
     """Internal request shape for apply_action('ingest_bundle', ...)."""
@@ -200,14 +207,28 @@ def _process_allergy(s: Session, patient_id: UUID, resource: dict, source_system
 def _process_medication_request(s: Session, patient_id: UUID, resource: dict, source_system: str, raw_record_id: UUID) -> None:
     med_id = uuid4()
     dosage = (resource.get("dosageInstruction") or [{}])[0].get("text", "")
+
+    med_concept = resource.get("medicationCodeableConcept", {})
+    med_name = med_concept.get("text") or (med_concept.get("coding") or [{}])[0].get("display")
+    medication_ref = None
+    if med_name:
+        medication_ref = s.execute(
+            text("SELECT id FROM medication WHERE name = :name"), {"name": med_name}
+        ).scalar()
+        # exact-name match only; a fixture whose medication name doesn't exactly match 
+        # the seeded medication.name won't link to inventory.
+
     s.execute(
-        text("""INSERT INTO medication_request (id, patient_id, status, dosage_text,
-                source_system, source_ref)
-                VALUES (:id, :pid, :status, :dose, :src, :ref)"""),
-        {"id": med_id, "pid": patient_id, "status": resource.get("status", "unknown"),
-         "dose": dosage, "src": source_system, "ref": resource["id"]},
+        text("""INSERT INTO medication_request (id, patient_id, medication_id, status, dosage_text,
+                requested_by, source_system, source_ref)
+                VALUES (:id, :pid, :medid, :status, :dose, :reqby, :src, :ref)"""),
+        {"id": med_id, "pid": patient_id, "medid": medication_ref,
+         "status": resource.get("status", "unknown"), "dose": dosage,
+         "reqby": None,  # SPEC-QUESTION: golden fixtures don't carry a requester user id
+         "src": source_system, "ref": resource["id"]},
     )
     _record_version(s, "MedicationRequest", med_id, resource, raw_record_id)
+    return med_id
 
 
 def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUID]) -> dict[str, int]:
@@ -264,6 +285,16 @@ def process_raw_records(s: Session, source_system: str, raw_record_ids: list[UUI
             continue  # can't attach an orphaned clinical resource; SPEC-QUESTION: log this?
 
         handlers[rtype](s, patient_id, resource, source_system, r["id"])
+
+        mapping = _RESOURCE_MAP.get(rtype)
+        if mapping:
+            new_row = s.execute(
+                text(f"SELECT * FROM {mapping['table']} WHERE source_system = :s AND source_ref = :r"),
+                {"s": source_system, "r": resource["id"]},
+            ).mappings().first()
+            if new_row:
+                evaluate_object(s, mapping["ontology_type"], new_row["id"], patient_id, dict(new_row))
+
         s.execute(text("UPDATE raw_record SET processed_at = :now WHERE id = :id"),
                   {"now": datetime.now(timezone.utc), "id": r["id"]})
         counts[rtype] = counts.get(rtype, 0) + 1

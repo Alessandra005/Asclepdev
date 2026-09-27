@@ -2,10 +2,12 @@
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 from uuid import UUID
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -28,6 +30,47 @@ DEFAULT_PROVIDERS = [
 ]
 
 GOLDEN_DIR = Path("/srv/data/seed/golden")
+
+MEDICATIONS = [
+    {"name": "Pembrolizumab 100 mg/4 mL", "on_hand": 0, "reorder_point": 5, "backordered": True, "restock_days": 6},
+    {"name": "Carboplatin 450 mg/45 mL", "on_hand": 14, "reorder_point": 5, "backordered": False, "restock_days": None},
+    {"name": "Pemetrexed 500 mg", "on_hand": 3, "reorder_point": 5, "backordered": False, "restock_days": 2},
+    {"name": "Albuterol inhaler", "on_hand": 40, "reorder_point": 10, "backordered": False, "restock_days": None},
+]
+
+
+def ensure_medications_and_inventory(s: Session) -> dict[str, UUID]:
+    """Seed medication + inventory_item rows. Returns name -> medication_id."""
+    ids: dict[str, UUID] = {}
+    for med in MEDICATIONS:
+        med_id = s.execute(
+            text("SELECT id FROM medication WHERE name = :name"), {"name": med["name"]}
+        ).scalar()
+        if med_id is None:
+            med_id = uuid.uuid4()
+            s.execute(
+                text("INSERT INTO medication (id, name) VALUES (:id, :name)"),
+                {"id": med_id, "name": med["name"]},
+            )
+        ids[med["name"]] = med_id
+
+        restock_at = None
+        if med["restock_days"] is not None:
+            restock_at = datetime.now(timezone.utc) + timedelta(days=med["restock_days"])
+
+        existing = s.execute(
+            text("SELECT id FROM inventory_item WHERE medication_id = :mid"), {"mid": med_id}
+        ).scalar()
+        if existing is None:
+            s.execute(
+                text("""INSERT INTO inventory_item (medication_id, on_hand, reorder_point, backordered, expected_restock_at)
+                        VALUES (:mid, :oh, :rp, :bo, :restock)"""),
+                {"mid": med_id, "oh": med["on_hand"], "rp": med["reorder_point"],
+                 "bo": med["backordered"], "restock": restock_at},
+            )
+    s.commit()
+    logger.info("Medication + inventory seeds verified.")
+    return ids
 
 
 def _wait_for_hapi(base_url: str, timeout: float = 90.0) -> None:
@@ -113,12 +156,14 @@ def seed_ingestion() -> None:
     from app.db import SessionLocal
 
     for provider in DEFAULT_PROVIDERS:
+
         logger.info(f"Waiting for {provider['name']} to be ready...")
         _wait_for_hapi(provider["fhir_base_url"])
     logger.info("All mock EHR servers ready.")
 
     with SessionLocal() as session:
         ensure_providers(session)
+        ensure_medications_and_inventory(session)
         targets = load_golden_bundles()
 
         for provider_id, fhir_patient_id in targets:
