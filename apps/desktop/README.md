@@ -37,8 +37,19 @@ Dr. Reyes sees the merge), one person hosts and everyone else joins:
 
 Changes show up for the other users within a few seconds. The shared data lives in the host app's
 memory: closing it resets the demo, and joined apps then show "No Asclep demo server answered" until
-you pick **This computer** or the host comes back. Everyone must be on the same network; venue Wi-Fi
-often blocks laptop-to-laptop traffic, so use a phone hotspot, or two windows on the host.
+you pick **This computer** or the host comes back.
+
+**Not on the same Wi-Fi?** Teammates only need to reach port 8787 on the host. Either:
+
+- **Tunnel link (only the host installs anything):** `winget install Cloudflare.cloudflared`, then,
+  while `pnpm demo:host` runs, `cloudflared tunnel --url http://localhost:8787`. Share the
+  `https://....trycloudflare.com` link it prints; teammates paste the whole link as the host
+  address. Anyone with the link can reach the demo (synthetic data only), so share it privately.
+- **Shared VPN:** everyone joins the same Tailscale tailnet (or Radmin VPN network) and enters the
+  host's VPN address, e.g. `100.x.y.z`.
+
+Venue Wi-Fi often blocks laptop-to-laptop traffic even on the same network; the tunnel link avoids
+that too.
 
 ## Other commands
 

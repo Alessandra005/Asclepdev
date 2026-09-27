@@ -63,7 +63,10 @@ export function normalizeDemoUrl(raw: string): string | null {
   if (!t) return null
   try {
     const u = new URL(/^https?:\/\//i.test(t) ? t : `http://${t}`)
-    return `${u.protocol}//${u.hostname}:${u.port || DEFAULT_DEMO_PORT}`
+    // Plain http is the host app itself (port 8787 unless given). An https link is a tunnel to it
+    // (e.g. cloudflared, for teammates on other networks) and keeps its own port.
+    if (u.protocol === 'http:' && !u.port) return `http://${u.hostname}:${DEFAULT_DEMO_PORT}`
+    return u.origin
   } catch {
     return null
   }

@@ -29,6 +29,11 @@ describe('shared demo server routing', () => {
     expect(normalizeDemoUrl('192.168.1.20')).toBe('http://192.168.1.20:8787')
     expect(normalizeDemoUrl(' http://10.0.0.5:9000/ ')).toBe('http://10.0.0.5:9000')
     expect(normalizeDemoUrl('localhost')).toBe('http://localhost:8787')
+    expect(normalizeDemoUrl('http://192.168.1.20')).toBe('http://192.168.1.20:8787')
+    // A tunnel link for teammates on other networks keeps its own (default https) port.
+    expect(normalizeDemoUrl('https://calm-river-test.trycloudflare.com/')).toBe(
+      'https://calm-river-test.trycloudflare.com'
+    )
     expect(normalizeDemoUrl('   ')).toBeNull()
   })
 
