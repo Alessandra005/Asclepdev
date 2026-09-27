@@ -65,6 +65,8 @@ def test_uncited_sentence_fails():
     assert validate.every_claim_cited("The biopsy shows adenocarcinoma.")
     assert validate.every_claim_cited("Gregory Hale is scheduled today.", {"gregory"})
     assert validate.citations_well_formed("No findings on file [[obj:Finding:none]].")
+    # "Dr." is not a sentence end: live, this made every attempt fail and salvage leave "Maya Reyes [[...]]"
+    assert validate.every_claim_cited(f"LUAD, confirmed by Dr. Maya Reyes [[obj:Finding:{oid}]].", {"reyes"}) == []
 
 
 def test_dosing_numbers_and_foreign_citations_fail():

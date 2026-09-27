@@ -29,6 +29,9 @@ NOTHING_TO_CITE = re.compile(
     r"couldn't find|could not find|returned nothing|did not return|no .{0,30} (?:on file|recorded)",
     re.IGNORECASE,
 )
+# Sentence ends, except after titles and abbreviations ("confirmed by Dr. Maya Reyes" is one sentence).
+SENTENCE_END = re.compile(r"(?<!\bDr\.)(?<!\bMr\.)(?<!\bMs\.)(?<!\bMrs\.)(?<!\bSt\.)(?<!\be\.g\.)(?<!\bi\.e\.)"
+                          r"(?<!\bvs\.)(?<=[.!?])\s+|\n+")
 MAX_ASK_WORDS = 150
 STATUS_WORDS = {"backordered", "backorder", "restock", "stock", "allergy", "allergic", "pending", "confirmed",
                 "overridden", "rejected", "abnormal", "critical", "elevated", "diagnosis", "diagnosed"}
@@ -40,7 +43,7 @@ def plain(text: str) -> str:
 
 
 def sentences(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    parts = SENTENCE_END.split(text)
     return [p.strip().lstrip("-*0123456789. ").strip() for p in parts
             if p.strip() and not p.strip().startswith("#")]
 
@@ -94,7 +97,7 @@ def drop_uncited(text: str, names: set[str] = frozenset()) -> str:
     """Deterministic repair (spec 10.1: "uncited clinical sentences are removed"): drop malformed citation tokens,
     then every sentence that states a record fact without a citation. Never adds text."""
     text = re.sub(r"\s*\[\[obj:[^\]]*\]\]", lambda m: m[0] if CITE.fullmatch(m[0].strip()) else "", text)
-    for s in re.split(r"(?<=[.!?])\s+|\n+", text):
+    for s in SENTENCE_END.split(text):
         core = s.strip().lstrip("-*0123456789. ").strip()
         if core and not CITE.search(core) and not NOTHING_TO_CITE.search(core) and is_claim(core, names):
             text = text.replace(s, "")
