@@ -1,6 +1,6 @@
 COMPOSE = docker compose -f infra/docker-compose.yml --env-file infra/.env
 
-.PHONY: up down logs seed dev-seed test gen-api dev-desktop demo-check migrate
+.PHONY: up down logs seed dev-seed mongo-ui test gen-api dev-desktop demo-check migrate
 
 up:            ## start all services
 	$(COMPOSE) up -d --build
@@ -19,6 +19,9 @@ seed: migrate  ## rebuild database and mock EHRs (spec section 16) - Alessandra
 
 dev-seed: migrate  ## demo users + patients + care teams (stopgap until `seed`), copied to Mongo - Brandon
 	$(COMPOSE) exec api python -m app.dev_seed
+
+mongo-ui:       ## browse the LiveScribing MongoDB at http://localhost:8082 (localhost only) - Brandon
+	$(COMPOSE) --profile tools up -d mongo-express
 
 test:
 	pytest services/api/tests -q
