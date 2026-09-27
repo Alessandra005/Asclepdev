@@ -4,6 +4,9 @@
   "private": true,
   "description": "Asclep desktop app (Electron + React 18 + Blueprint). Lives in apps/desktop in the team repo.",
   "main": "./out/main/index.js",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "dev:mock": "cross-env VITE_USE_MOCKS=true electron-vite dev",
