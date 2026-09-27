@@ -31,3 +31,10 @@ def test_me_lists_permissions(client, fake_session):
 def test_slides_need_care_team(client, fake_session):
     r = client.get(f"/api/v1/patients/{PID}/slides", headers=token("physician"))
     assert r.status_code == 403 and r.json()["error"]["code"] == "FORBIDDEN_NOT_ON_CARE_TEAM"
+
+
+def test_slides_are_for_whoever_runs_the_lab_technician(client, fake_session):
+    r = client.get(f"/api/v1/patients/{PID}/slides", headers=token("nurse"))
+    assert r.status_code == 403 and r.json()["error"]["code"] == "FORBIDDEN_ROLE"
+    r = client.get(f"/api/v1/patients/{PID}/slides", headers=token("lab_staff"))  # specimen_only: no care team needed
+    assert r.status_code == 200 and r.json() == {"items": [], "next_cursor": None}

@@ -73,7 +73,7 @@ def list_findings(patient_id: UUID,
 
 @router.get("/patients/{patient_id}/slides")
 def list_slides(patient_id: UUID,
-                p: Principal = Depends(require("view_labs", patient_param="patient_id", object_type="Slide")),
+                p: Principal = Depends(require("run_lab_technician", patient_param="patient_id", object_type="Slide")),
                 s=Depends(get_session)):
     """Slides with their latest finding (null until analyzed), so the Lab tab can offer Analyze (spec 17 step 4)."""
     rows = s.execute(text("""

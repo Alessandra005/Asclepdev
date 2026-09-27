@@ -25,6 +25,9 @@ class FakeSession:
                 class _M:
                     def first(self):
                         return None
+
+                    def all(self):
+                        return []
                 return _M()
         return _R()
 
